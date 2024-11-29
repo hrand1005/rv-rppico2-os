@@ -1,0 +1,5 @@
+for some reason, these march specified extensions cause the board to fail (maybe dealing with ebreak specifically?)
+
+zca
+zcb
+zcmp
