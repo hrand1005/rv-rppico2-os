@@ -1,7 +1,7 @@
 /**
  * This entry point will be located at the binary's the lowest address.
  * It is the first thing the bootrom will execute after interpreting the
- * metadata in the binary info header section.
+ * metadata in the image definition.
  */
 .section .reset, "ax"
 .global _entry_point
@@ -24,11 +24,58 @@ _reset_handler:
     csrw mtvec, a0
 
     /*
-     * 1. initialize xip, load secondary bootloader from flash if necessary
+     * initialize xip, load secondary bootloader from flash if necessary
+     * BOOTRAM_BASE = 0x400e0000
      */
+    mv a0, sp 
+    addi sp, sp, -256
+    mv a1, sp
+    la a2, 0x400e0000u
+    
+copy_xip_fn:
+    lw a3, (a2)
+    sw a3, (a1)
+    addi a2, a2, 4
+    addi a1, a1, 4
+    bltu a1, a0, copy_xip_fn
+
+    /* execute xip setup function */
+    jalr sp
+    addi sp, sp, 256
+
+    /* init .data section (copy from flash to RAM) */
+    
+    la a0, __data_load_start
+    la a1, __data_start
+    la a2, __data_end
+
+copy_data:
+    beq a1, a2, copy_data_end
+    lw a3, (a0)
+    sw a3, (a1)
+    addi a0, a0, 4
+    addi a1, a1, 4
+    j copy_data
+
+copy_data_end:
+    /* done */
+
+    /* zero .bss section */
+    
+    la a0, __bss_start
+    la a1, __bss_end
+
+zero_bss:
+    beq a0, a1, zero_bss_end
+    sw zero, (a0)
+    addi a0, a0, 4
+    j zero_bss
+
+zero_bss_end:
+    /* done */
 
     /*
-     * 2. clear all IRQ enable array bits
+     * clear all IRQ enable array bits
      * NOTE: apparently this is done automatically on reset
      * However, if you had to, you could add this to the following loop:
      *
@@ -36,7 +83,7 @@ _reset_handler:
      */
 
     /*
-     * 3. clear all IRQ force array bits
+     * clear all IRQ force array bits
      * 32 iters * 16 bits = 512 bits cleared.
      * NOTE: MEIFA offset = 0xbe2
      */
@@ -46,10 +93,10 @@ clear_meip:
     addi a0, a0, -1
     bgtz a0, clear_meip
     
-    /* 4. enable external interrupts */
+    /* enable external interrupts */
 
     /*
-     * 4a. enable mie.meie
+     * enable mie.meie
      * NOTE: 0x800u = cause 11 (MEIE)
      * NOTE: MIE at offset 0x304, so that could work too, apparently
      */
@@ -57,14 +104,14 @@ clear_meip:
     csrw mie, a0
 
     /*
-     * 4b. enable mstatus.mie
+     * enable mstatus.mie
      * NOTE: MSTATUS at offset 0x300, so that could work too, apparently
      * NOTE: 0x8u = Bit 3 (represents mie in mstatus)
      */
     csrsi mstatus, 0x8u
 
     /*
-     * 5. clear mscratch, which detects nested machine exceptions
+     * clear mscratch, which detects nested machine exceptions
      */
     csrw mscratch, zero
 
@@ -114,16 +161,16 @@ test_mei_irq0:
     /* We shouldn't make it this far, so go to jail */
     j jail
 
+
 /**
- * Note that in X mode, the vector table must be 64 byte aligned.
+ * Note that in 'Vectored' mode, the vector table must be 64 byte aligned.
  * See rp2350 datasheet section 3.8.4.2.1
  * See riscv-privileged-20211203 section 3.1.7
  */
 .section .vectors, "ax"
-.p2align 6
 __vector_table:
 
-/** disable compressed instruction encodings */
+/* disable compressed instructions */
 .option push
 .option norvc
 .option norelax

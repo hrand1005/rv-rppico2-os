@@ -24,6 +24,7 @@ MEMORY
 {
     FLASH(rx) : ORIGIN = 0x10000000, LENGTH = 16M
     RAM(rwx) : ORIGIN = 0x20000000, LENGTH = 512k
+    SRAM(rx): ORIGIN = 0x20081f00, LENGTH = 252
 }
 
 ENTRY(_entry_point)
@@ -33,7 +34,10 @@ SECTIONS
     .text : {
         /* reset section contains _entry_point */
         KEEP (*(.reset))
+        /* mtvec.MODE = Vectored requires 64 byte alignment */
+        . = ALIGN(64);
         KEEP (*(.vectors))
+        . = ALIGN(4);
         __image_def_start = .;
         KEEP (*(.image_def))
         __image_def_end = .;
@@ -84,5 +88,6 @@ SECTIONS
         . += __stack1_size;
         __stack1_base = .;
     } > RAM
+
 }
 

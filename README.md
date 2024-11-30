@@ -15,6 +15,12 @@ They include a `Makefile`, assembly (`startup.S`), a linker script (`memmap.ld`)
 things. I'd recommend going through the raspberry pi pico 2 "getting started"
 document to set up the proper tooling.
 
+At the bottom of `startup.S` is an "image definition". This is a special block of
+bytes that indicates to the immutable bootrom that the binary we're flashing onto
+the board is a risc-v executable that we want to be called. The image definition is
+currently identical to the minimal image provided in the rp2350 datasheet section
+5.9.5.2 "Minimum RISC-V IMAGE_DEF" [3].
+
 ## Bootloader (11/27/24 - ?)
 
 ### Vector Table (11/27/24)
@@ -57,8 +63,8 @@ are possible:
 - `mtip: cause 7`  --> Machine Timer Interrupt
 - `msip: cause 3`  --> Machine Software Interrupt
 
-> NOTE: when multiple interrupts are active, the hardware handles them in `meip` >
-`msip` > `mtip` order, NOT an order related to the cause number.
+> NOTE: when multiple interrupts are active, the hardware handles them in `meip` -> 
+`msip` -> `mtip` order, NOT an order related to the cause number.
 _"Multiple simultaneous interrupts destined for M-mode are handled in the
 following decreasing priority order: MEI, MSI, MTI, SEI, SSI, STI." [1]
 
@@ -268,7 +274,200 @@ request number 0 in MEIEA:
     fence.i
 ```
 
-Looks good!
+Looks good! We'll revisit interrupt handling later on as needed and when we
+studying the hazard3 interrupt controller.
+
+### XIP Subsystem (11/28/24 - 11/30/24)
+
+The XIP subsystem refers to a 16KB cache that speeds up accesses to flash
+memory. To set up the XIP subsystem, we must understand a little about how
+the processor bootrom first interacts with flash storage, which will also
+answer how the bootrom is able to find our image in the first place.
+
+The bootrom is the physically immutable boot code on the rp2350 that calls
+into our bootloader. Before the bootrom can search flash storage for an image,
+it must first figure out how to read the contents of flash storage, as there 
+are a variety of flash storage implementations that might be used with the
+rp2350 processor. The bootrom tries a variety of these QSPI "modes" to figure
+out how to interact with flash and also to try to read the contents of flash
+memory and find the program image. When the proper way to interface with flash
+storage is identified, an "XIP Setup Function" is written to the first 256
+bytes of boot RAM. From the rp2350 datasheet:
+
+_"This setup code, referred to as an XIP setup function, is usually copied into
+RAM before execution to avoid running from flash whilst the XIP interface is
+being reconfigured."_
+
+And, I suppose, to use a non-default XIP setup function, the datasheet says this:
+
+_"You should save your XIP setup function in the first 256 bytes of boot RAM to
+make it easily locatable when the XIP mode is re-initialised following a serial
+flash programming operation which had to drop out of XIP mode. The bootrom
+writes a default XIP setup function to this address before entering the flash
+image, which restores the mode the bootrom discovered during flash programming."_ [3]
+
+In any case, to initialize the XIP subsystem, we will need to _read_ and then find
+a way to _execute_ the XIP setup function. To do this, we can simply push the
+contents of the boot RAM to an executable location (the program stack), and invoke
+it.
+
+```
+    /* BOOTRAM_BASE = 0x400e0000 */
+    mv a0, sp 
+    addi sp, sp, -256
+    mv a1, sp
+    la a2, 0x400e0000u
+    
+copy_xip_fn:
+    lw a3, (a2)
+    sw a3, (a1)
+    addi a2, a2, 4
+    addi a1, a1, 4
+    bltu a1, a0, copy_xip_fn
+
+    /* execute xip setup function */
+    jalr sp
+    addi sp, sp, 256
+```
+
+Running this doesn't appear to break anything, (and the function returns), but
+it's not actually obvious what initialization is being performed for our board.
+We set a breakpoint and inspect the boot RAM in `gdb` with the following
+instruction:
+
+```
+x/64i 0x400e0000
+```
+>NOTE: (256 bytes / 4-word instructions = 64 instructions)
+
+...which shows me the following:
+
+```
+   0x400e0000:  auipc   a2,0x0
+   0x400e0004:  lw      a0,16(a2)
+   0x400e0006:  lw      a1,20(a2)
+   0x400e0008:  lw      a2,12(a2)
+   0x400e000a:  jr      a2
+   0x400e000c:  .insn   2, 0x7d7e
+   0x400e000e:  unimp
+   0x400e0010:  lb      zero,0(zero) # 0x0
+   0x400e0014:  lb      zero,0(zero) # 0x0
+   0x400e0018:  unimp
+   0x400e001a:  unimp
+   0x400e001c:  unimp
+   ...etc
+```
+
+a2 is set to contain the auipc instruction's address. Then, a0, a1, and a2 get
+the words at offsets 16, 20, and 12 bytes from a2 respectively (i.e. the words
+encoded at 0x400e0010, 0x400e0014, 0x400e0000c) -- these appear as instructions
+above, but are more informative as hex values:
+
+```
+(gdb) x/w 0x400e0010
+0x400e0010:     0x00000003
+(gdb) x/w 0x400e0014
+0x400e0014:     0x00000003
+(gdb) x/w 0x400e000c
+0x400e000c:     0x00007d7e
+```
+
+Then, the assembler jumps to the address in a2 (0x7d7e). This is a point in the
+bootrom, and is likely a helper function like those before it as detailed in
+table 5.4.1 in the rp2350 datasheet [3]. With more digging I could probably
+get more insight about what is configured here, but it's annoying, so I decided
+instead to inspect the effect of this on some of the QSPI configuration registers.
+
+12.14.2 goes into detail about the different kinds of transfers that occur over
+QSPI. Among others, the transfers that occur are configured by  by the
+M0/M1_RFMT and M0/M1_WFMT registers (including number of data lines), and the 
+command (including prefix and suffix) are configure by the M0/M1_RCMD and
+M0/M1_WCMD registers -- in both sets of registers, R indicates reads and W
+writes.
+
+Inspecting these registers gives the following:
+
+```
+M0_RFMT = 0x000492a8
+M0_RCMD = 0x000000eb
+M0_WFMT = 0x00001000
+M0_WCMD = 0x0000a002
+```
+
+Studying the registers can inform us about how the QSPI has been configured.
+For example, for reads on chip select (CSn) zero:
+```
+M0_RFMT
+-------
+DTR:            0x0 --> normal read command transfer rate
+Dummy Len:      0x4 --> 16 dummy bits
+Suffix Len:     0x2 --> 8 bit suffix
+Prefix Len:     0x1 --> 8 bit prefix
+Data Width:     0x2 --> Quad data transfer width
+Dummy Width:    0x2 --> Quad dummy transfer width
+Suffix Width:   0x2 --> Quad suffix transfer width
+Address Width:  0x2 --> Quad address transfer width
+Prefix Width:   0x0 --> Single prefix transfer width
+
+M0_RCMD
+-------
+Prefix:         0xeb --> Command prefix, used since prefix len != 0
+Suffix:         0x00 --> Command suffix, used since suffix len != 0
+```
+
+This gives us a glimpse into how transfers to/from memory are configured. To
+be honest though, there are a lot of details about the memory transfer, and I
+don't really have a deep understanding of what is going on here other than that
+in theory using all data transfer lines should (hopefully) improve read
+throughput, as opposed to the default (reset) values for M0_RFMT (0x1000) and
+M0_RCMD (0xa003), which simply result in "03h" serial read transfers using one
+data transfer line. It would make sense to revisit these settings if you have
+tasks that result in large data transfers to/from flash. Perhaps we can test
+alternate configurations against various benchmarks here later.
+
+### Interrupt Handling
+
+
+### .data Copy (11/29/24)
+
+We must initialize `.data` section from flash storage into RAM. This is fairly
+straightforward:
+
+```
+    la a0, __data_load_start
+    la a1, __data_start
+    la a2, __data_end
+    
+copy_data:
+    beq a1, a2, copy_data_end
+    lw a4, a3(a0)
+    sw a4, a3(a1)
+    addi a0, 4
+    addi a1, 4
+    j copy_data
+
+copy_data_end:
+    /* done */
+```
+
+### .bss Zero (11/29/24)
+
+We must set the contents of `.bss` in RAM to 0. This is also fairly
+straightforward.
+
+```
+    la a0, __bss_start
+    la a1, __bss_end
+
+zero_bss:
+    beq a0, a1, zero_bss_end
+    sw zero, (a0)
+    addi a0, a0, 4
+    j zero_bss
+
+zero_bss_end:
+    /* done */
+```
 
 # References
 
