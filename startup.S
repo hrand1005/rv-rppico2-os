@@ -116,11 +116,15 @@ clear_meip:
     csrw mscratch, zero
 
     /* test machine enabled interrupts */
-    j test_mei_irq0
+    /* j test_mei_irq0 */
 
+    j main
+
+    /* program ends */
     ebreak
 
 jail:
+    /* we should never get here */
     ebreak
     j jail
 

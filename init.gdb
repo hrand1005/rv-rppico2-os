@@ -1,5 +1,5 @@
 target remote localhost:3333
-monitor program bootstrap.elf
+monitor program main.elf
 monitor reset init
 continue
 

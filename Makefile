@@ -3,15 +3,17 @@ AS = riscv32-unknown-elf-as
 LD = riscv32-unknown-elf-ld
 GDB = riscv32-unknown-elf-gdb
 
-TARGET = bootstrap.elf
-SRCS = startup.S
-OBJS = $(SRCS:.S=.o)
+TARGET = main.elf
+SRCS = startup.S main.c
+OBJS = startup.o
 MEMMAP = memmap.ld
 
-CFLAGS = -mabi=ilp32 -misa-spec=20191213 -mpriv-spec=1.12 \
-		 -march=rv32ima_zicsr_zifencei_zba_zbb_zbkb_zbs_zca_zcb_zcmp -g
-ASFLAGS = $(CFLAGS)
-LDFLAGS = -T $(MEMMAP)
+ARCHFLAGS = -mabi=ilp32 -misa-spec=20191213 \
+		 -march=rv32ima_zicsr_zifencei_zba_zbb_zbkb_zbs_zca_zcb_zcmp
+
+CFLAGS = $(ARCHFLAGS) -g -nostdlib -nodefaultlibs
+ASFLAGS = $(ARCHFLAGS) -g -mpriv-spec=1.12
+LDFLAGS = -T $(MEMMAP) -e _entry_point -Wl,--no-warn-rwx-segments
 
 .DEFAULT_GOAL := build
 
@@ -33,8 +35,10 @@ check: $(TARGET)
 
 build: $(TARGET)
 
-$(TARGET): $(OBJS) $(MEMMAP)
-	$(LD) $(LDFLAGS) -o $(TARGET) $(OBJS)
+$(TARGET): $(OBJS) $(MEMMAP) main.c
+	@echo final cmd: $(CC) $(LDFLAGS) -o $(TARGET) $(OBJS) main.c
+
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $(TARGET) $(OBJS) main.c
 
 %.o: %.S
 	$(AS) $(ASFLAGS) -o $@ $<

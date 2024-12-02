@@ -469,8 +469,193 @@ zero_bss_end:
     /* done */
 ```
 
+### Blinky (11/30/24 - 12/1/24)
+
+With this foundation, let's create a simple program. In a separate file
+`main.S`, let's write blinky.
+
+```
+.section .text
+.global blinky
+blinky:
+    ebreak
+```
+
+You can look at the pico 2 pinout document [4] to see what controls the on-board
+LED. It is labeled GP25, for GPIO 25.
+
+GPIO pins can be controlled by a variety of functions. For our purposes, we'll
+just need Single-cycle IO (SIO) to control pin 25, and we only need to drive
+an output signal to the LED to turn it on.
+
+Firstly, it's necessary to configure the GPIO pin for SIO. To do this, we need
+to use the `GPIO25_CTRL` register, offset from `IO_BANK0`. Inspecting the
+documentation for this register shows that `0x5` in the least significant bits
+selects the SIO function. For this register, it's fine to simply store that
+value, as the other fields won't be used here:
+
+```
+    la a0, 0x400280cc   /* IO_BANK0 + GPIO25_CTRL */
+    li a1, 0x5
+    sw a1, (a0)
+```
+
+Pad control user bank at `0x40038000`. GPIO25 at offset `0x68` so `0x40038068`.
+We can use this to clear the ISO control bit, which needs to be removed once
+the pad is "configured by software" (that's us). Though in this case, we should
+preserve the other bit values in the register. We can use the RISC-V B (bit
+manipulation) extension for this purpose:
+
+```
+    la a0, 0x40038068   /* PADS_BANK0 + GPIO25 */
+    lw a1, (a0)
+    bclr a1, a1, 8
+    sw a1, (a0)
+```
+
+Now we should be ready to use SIO to control the LED. We can enable GPIO output
+on particular registers using a mask, in this case we will use a mask (25th bit)
+when we write values to these registers. First, we must enable output for our
+pin, which we can do with `GPIO_OE_SET`:
+
+```
+    la a0, 0xd0000038   /* SIO: GPIO_OE_SET */
+    bset a1, zero, 25   /* Mask for GPIO pin 25 */
+    sw a1, (a0)
+```
+
+Finally, we're ready to make our LED blink. We can set and clear the output to
+our LED with the `GPIO_OUT_SET` and `GPIO_OUT_CLR` registers. For now, we can
+spin in some simple loops to create a delay so that we may observe our blinky
+LED. Here's what the loop looks like:
+
+```
+loop:
+    sw a1, (a0)
+
+    li a4, 0x200000
+    mv a5, zero
+spin1:
+    addi a5, a5, 1
+    blt a5, a4, spin1
+
+    sw a1, (a2)
+
+    li a4, 0x200000
+    mv a5, zero
+spin2:
+    addi a5, a5, 1
+    blt a5, a4, spin2
+
+    j loop
+```
+
+Finally, we can put it all together:
+
+```
+.section .text
+.global blinky
+blinky:
+    la a0, 0x400280cc   /* IO_BANK0: GPIO25_CTRL */
+    li a1, 0x5
+    sw a1, (a0)
+
+    la a0, 0x40038068   /* PADS_BANK0 + GPIO25 */
+    lw a1, (a0)
+    bclr a1, a1, 8
+    sw a1, (a0)
+
+    la a0, 0xd0000038   /* SIO: GPIO_OE_SET */
+    bset a1, zero, 25   /* Mask for GPIO pin 25 */
+    sw a1, (a0)
+
+    la a0, 0xd0000018   /* SIO: GPIO_OUT_SET */
+    la a2, 0xd0000020   /* SIO: GPIO_OUT_CLR */
+    
+loop:
+    sw a1, (a0)
+
+    li a4, 0x200000
+    mv a5, zero
+spin1:
+    addi a5, a5, 1
+    blt a5, a4, spin1
+
+    sw a1, (a2)
+
+    li a4, 0x200000
+    mv a5, zero
+spin2:
+    addi a5, a5, 1
+    blt a5, a4, spin2
+
+    j loop
+```
+
+It's worth also taking a quick peek at how our implementation compares to the
+blink_simple example from the `pico-examples` repository. If we disassemble the
+output we can see some interesting things. For example, in `gpio_init`:
+
+```
+gpio_init:
+    # NOTE: a0 gets 25
+
+    # 1.
+    bset a3,zero,a0
+    lui	a4,0xd0000
+    lui	a5,0x40038
+    sw	a3,64(a4)
+
+    addi a5,a5,4 # 40038004 <__StackTop+0x1ffb6004>
+    sw a3,32(a4)
+
+    # 2.
+    sh2add a5,a0,a5
+    lw a4,0(a5)
+    lui	a3,0x1
+    add	a3,a3,a5
+    xori a4,a4,64
+    andi a4,a4,192
+    lui	a2,0x40028
+    sw a4,0(a3) # ???
+
+    sh3add a0,a0,a2
+    li a4,5
+    lui	a3,0x3
+    sw a4,4(a0)
+
+    # 3.
+    add	a5,a5,a3
+    li a4,256
+    sw a4,0(a5) # ???
+```
+
+Regarding 1: the SDK makes sure to clear the output bits, which is good
+practice. If we wanted to make our implementation more robust (I don't care to)
+we should include that so that we know more precisely the state of the system
+before we start sending signals willy-nilly.
+
+Regarding 2: if you go through the effort to figure out the value in `a3` at
+the time the store instruction is executed, you will find that it is at 
+`0x40039068`. But this doesn't match any registers in the rp2350 data sheet
+offset from `PADS_BANK0` -- it is `0x1000` offset from the `GPIO25` register.
+And at the end of 3, a value is stored at `0x4003b068` -- which is `0x3000`
+off of this register. What is going on here?
+
+The answer is that these are atomic registers, detailed in 2.1.3 in the rp2350
+datasheet [3]. For `PADS_BANK0` (and other peripherals/registers), there are
+corresponding "atomic" registers that let you perform atomic XORs on write
+(+ 0x1000), atomic bitmasks on write (+ 0x2000), and atomic bitmask clears on
+write (+ 0x3000). This is how the SDK clears the ISO control bit for GPIO25,
+rather than performing separate (not atmoic) loads and stores to preserve the
+value when attempting to clear the bit, for example. As with 1, we should
+incorporate these registers when appropriate for a robust (correct) system, 
+especially when we start adding multiple tasks (and making use of our second
+core!), where race conditions might occur.
+
 # References
 
 1. riscv-privileged-20211203.pdf
 2. riscv-20191213.pdf
 3. rp2350-datasheet.pdf
+4. pico-2-pinout.pdf
