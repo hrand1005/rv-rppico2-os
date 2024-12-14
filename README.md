@@ -161,7 +161,7 @@ understanding both a variety of control status registers (CSRs) in RISC-V as
 well as the provided rp2350 memory mapped registers that implement interrupt
 enabling/disabling and pending/clearing interrupt requests.
 
-The slew of acronyms in the privileged spec and rp2350 datasheet are a bit
+The slough of acronyms in the privileged spec and rp2350 datasheet are a bit
 confusing, so let me clarify a few terms:
 
 mstatus = machine status register
@@ -652,6 +652,87 @@ value when attempting to clear the bit, for example. As with 1, we should
 incorporate these registers when appropriate for a robust (correct) system, 
 especially when we start adding multiple tasks (and making use of our second
 core!), where race conditions might occur.
+
+### Project Layout (12/13/24 - ?)
+
+Now that we've gotten started (and we're really about to hit our stride here),
+it would be wise to set ourselves up for the future by implementing some good
+software engineering practices. Let's revisit our Makefile, directory structure,
+and workflow so that we are set up for the future as our project becomes more
+complex. We'll probably want to be able to do the following:
+
+- Easily compile and run different programs (OSes, applications, tests, etc.)
+- Easily add new header and source files which get linked in during compilation
+- Automate boring stuff where possible (e.g. code formatting)
+- Write and maintain documentation
+
+So where do we start? Let's begin by organizing our code in such a way that we
+can easily add new `.c` and `.h` files. Let's also make it so that we can
+compile and run a variety of "user programs" (applications) on top of our
+kernel. We'll add the following directories:
+
+```
+kernel
+user
+```
+
+While we're at it, let's move build artifacts out of the top level directory. 
+Let's put our executables in `build/`. To support these changes as well as 
+compiling different and arbitrary programs, we'll need to modify our Makefile:
+
+```
+```
+
+We can use our knowledge of our directory structure to more rigorously and
+accurately define sections in our linker script:
+
+```
+```
+
+While we're at it, let's move our linker script, gdb template, and other runtime
+helper scripts and utilities to `util/`. 
+
+For the finishing touches, let's create a spot and mechanism for documentation. We'll
+add the `docs/` directory for our documentation artifacts, and new rules for creating
+and removing doxygen documentation:
+
+```
+```
+
+Finally, let's automate documentation generation and code formatting. We can specify
+how we want to format our code using `clang-format`, to install:
+
+```
+```
+
+...and to specify our formatting rules:
+
+```
+```
+
+I do it this way because I am a sane person, but feel free to use alternate
+styling if you are some kind of sicko.
+
+Since this whole thing is being maintained with git, we'll create precommit
+hooks that ensure these things are kept things up-to-date:
+
+```
+```
+
+Plus we'll add some stuff to our `.gitignore` file to ensure we're not always
+pushing build artifacts to our GitHub repo:
+
+```
+```
+
+Finally, let's create a README.md with instructions for running and building
+our project:
+
+```
+```
+
+Congrats, you've gone from hobbyist developer to professional software engineer.
+That's basically all there is to it ;).
 
 # References
 
