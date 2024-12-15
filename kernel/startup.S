@@ -1,4 +1,10 @@
 /**
+ * @file startup.S
+ * @brief Bootstraps the kernel.
+ * @author Herbie Rand
+ */
+
+/**
  * This entry point will be located at the binary's the lowest address.
  * It is the first thing the bootrom will execute after interpreting the
  * metadata in the image definition.

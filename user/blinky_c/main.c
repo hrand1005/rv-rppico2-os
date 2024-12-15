@@ -1,3 +1,9 @@
+/**
+ * @file main.c
+ * @brief Blinky implementation in C, plus some
+ *        potentially informative comments.
+ * @author Herbie Rand
+ */
 #define SIO_FUNCSEL (0x5)
 #define LED_MASK    (1 << 25)
 

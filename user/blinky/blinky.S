@@ -1,3 +1,8 @@
+/**
+ * @file blinky.S
+ * @brief RISC-V Assembly implementation of blinky.
+ * @author Herbie Rand
+ */
 .section .text
 .global main
 main:
