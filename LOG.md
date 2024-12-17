@@ -186,7 +186,7 @@ Separately, there is the `mie` register. `mie.meie` represents the bit position 
 `mie` that can enable external interrupts. Its position corresponds to the cause
 (11), and by setting this bit we enable machine external interrupts.
 
-At this point, we have enabled machine interrupts `mstatus.mie`, and specifically
+So we will need to enable machine interrupts (`mstatus.mie`), and specifically
 machine external interrupt requests `mie.meie`. But machine external interrupt
 requests _themselves_ may occur for a number of reasons, and each one is manifested
 by pending a interrupt request (IRQ). It's at this level of granularity that the
@@ -250,10 +250,7 @@ clear_meip:
     csrw mie, a0
 ```
 
-If we peek at the pico-sdk bootstrap code, we can see that they also clear
-`mscratch` here. Seems like good practice, so we may as well include it in
-our implementation:
-
+Now we can set the global interrupt enable (`mstatus.mie`):
 ```
     csrsi mstatus, 0x8u
 ```
@@ -425,7 +422,6 @@ data transfer line. It would make sense to revisit these settings if you have
 tasks that result in large data transfers to/from flash. Perhaps we can test
 alternate configurations against various benchmarks here later.
 
-### Interrupt Handling
 
 
 ### .data Copy (11/29/24)
@@ -868,6 +864,324 @@ blinky): `make run APP=blinky`
 
 Congrats, you've gone from hobbyist developer to professional software engineer.
 That's basically all there is to it.
+
+### Exception & Interrupt Handling
+
+We still haven't implemented "trap" handling, we only created a vector table
+with unimplemented interrupt and exception handlers. From `kernel/startup.S`:
+
+```
+/**
+ * Note that in 'Vectored' mode, the vector table must be 64 byte aligned.
+ * See rp2350 datasheet section 3.8.4.2.1
+ * See riscv-privileged-20211203 section 3.1.7
+ */
+.section .vectors, "ax"
+__vector_table:
+
+/* disable compressed instructions */
+.option push
+.option norvc
+.option norelax
+
+j isr_exc      /* BASE +  0 */ 
+.word 0        /* BASE +  4 */ 
+.word 0        /* BASE +  8 */ 
+j isr_msi      /* BASE + 12 */ 
+.word 0        /* BASE + 16 */ 
+.word 0        /* BASE + 20 */ 
+.word 0        /* BASE + 24 */ 
+j isr_mti      /* BASE + 28 */ 
+.word 0        /* BASE + 32 */ 
+.word 0        /* BASE + 36 */ 
+.word 0        /* BASE + 40 */ 
+j isr_mei      /* BASE + 44 */ 
+ 
+.option pop
+
+.weak isr_exc
+isr_exc:
+    ebreak
+    j jail
+
+.weak isr_msi
+isr_msi:
+    ebreak
+    j jail
+
+.weak isr_mti
+isr_mti:
+    ebreak
+    j jail
+
+.weak isr_mei
+isr_mei:
+    ebreak
+    j jail
+```
+
+Events in Operating Systems (including RTOSes) are primarily driven by
+"traps", which is a catch-all term for exceptions and interrupts in RISC-V
+jargon. Exceptions (`isr_exc`) are triggered by faults such as illegal
+operations (e.g. memory access violations). Software interrupts (`isr_msi`)
+are propogated by software for various reasons, such as user space programs
+requesting privileged services to be carried out by the kernel (system calls).
+Timer interrupts (`isr_mti`) are used for clocks, which are important for
+implementing time-sensitive tasks and operations. External interrupts (`isr_mei`)
+indicate that events outside the processor (e.g. DMA transfers, peripheral
+events) have transpired, and enable the operating system to react accordingly.
+
+All of our trap handling implementation will be informed by the RISC-V
+specification [1], but the rp2350 datasheet also details the Hazard3 interrupt
+controller and associated Xh3irq extension for handling external interrupts,
+so we'll also refer to that later.
+
+#### Synchronous Exception Handling
+
+Firstly, let's consider synchronous exceptions. From the RISC-V privileged spec,
+we know that synchronous exceptions jump to the base address of our vector
+table, but once we're in the interrupt service routine (`isr_exc`), how can
+we distinguish the cause of our exception?
+
+Even though exceptions don't vector into the offset set by `mcause` to execute
+a corresponding `isr`, `mcause` is still set with an exception code indicating
+the cause of the exception. In the privileged spec 3.1.15, we can see a list of
+exception codes for exceptions (interrupt bit is 0!) in table 3.6:
+
+| Interrupt Bit | Exception Code | Description |
+| ---             | ---            | ---         |
+| 0 | 0 | Instruction address misaligned |
+| 0 | 1 | Instruction access fault |
+| 0 | 2 | Illegal instruction |
+| 0 | 3 | Breakpoint |
+| 0 | 4 | Load address misaligned |
+| 0 | 5 | Load access fault |
+| 0 | 6 | Store/AMO address misaligned |
+| 0 | 7 | Store/AMO access fault |
+| 0 | 8 | Environment call from U-mode |
+| 0 | 9 | Environment call from S-mode |
+| 0 | 10 | Reserved |
+| 0 | 11 | Environment call from M-mode |
+| 0 | 12 | Instruction page fault |
+| 0 | 13 | Load page fault |
+| 0 | 14 | Reserved |
+| 0 | 15 | Store/AMO page fault |
+| 0 | 16-23 | Reserved |
+| 0 | 24-31 | Designated for custom use |
+| 0 | 32-47 | Reserved |
+| 0 | 48-63 | Designated for custom use |
+| 0 | >= 64 | Reserved |
+
+The RISC-V privileged spec indicates that other information (such as faulting
+virtual memory address) _may_ be written to the `mtval`, but the rp2350
+datasheet indicates that Hazard3 hardwires this register to 0, so it will not
+provide us any useful information (see 3.8.4.1 in [1]).
+
+The `mepc` register is also of interest, as it provides the address of the
+instruction that was interrupted or encountered the exception.
+
+The `mtinst` register may in some cases be written with a value that provides
+information about the trapping instruction according to 8.4.5 [3]. But it 
+would seem that writing to this register is not strictly necessary, and might
+just be implemented by hardware. Since the rp2350 datasheet makes no mention
+of this register, I'll assume it's not applicable here.
+
+The `mscratch` register is _"dedicated for use by machine mode... it is used to
+hold a pointer to a machine-mode hart-local context space and swapped with a
+user register upon entry to an M-mode trap handler."_ [3]. A pointer to a
+machine-mode hart-local context space... for what, exactly? Apparently, for
+whatever we want. Hence the name scratch. The rp2350 datasheet suggests it may 
+be used to store some pointer to a dedicated interrupt handler stack. The pico
+sdk uses it to check for nested exceptions by zeroing it out outside the
+exception handler (during boot and when returning from exception handling) and
+using it to save the return address inside the handler, which has the added
+benefit of preventing the exception handler from needing to push the return
+address to the stack before calling the appropriate exception handler. It
+accomplishes this with a simultaneous read and write to swap the contents of
+`ra` and `mstatus`. This seems like a wise idea, so let's also use the
+`mscratch` register for this purpose. If we find a better design, it should be
+easy enough to fix. At the beginning of our startup code:
+
+```
+    csrw mscratch, zero
+```
+
+And we'll do the other part in the exception handling. There's one more part 
+to look at before that though, and that is the calling convention. If we want
+to call subroutines to handle interrupts, we'll need to obey the RISC-V calling
+conventions. We should also note that unlike other architectures RISC-V doesn't
+do much work for us in this regard, the rp2350 datasheet says this:
+
+_"Hardware... does not save the core GPRs, and software is responsible for
+ensuring the execution of the handler does not perturb the foreground
+context"_ [1].
+
+With that, let's create a simple exception handler that checks for nested
+exceptions, saves/restores caller-saved registers, and dispatches exception
+requests to the appropriate request handler. Here's what I came up with:
+
+```
+/**
+ * @brief Handles synchronous exceptions as defined by the RISC-V ISA.
+ * Assumes mscratch is zeroed out on startup, and the register is used
+ * to detect nested exceptions, although in that case the core is halted.
+ */
+isr_exc:
+    // swap mscratch and ra to detect nested exceptions.
+    // if mscratch (swapped to ra) not zero, we just
+    // nested an exception, and should go to jail.
+    csrrw ra, mscratch, ra
+    bnez ra, jail
+    addi sp, sp, -60
+    // save the remaining caller-saved registers before dispatch
+    sw a0, 0(sp)
+    sw a1, 4(sp)
+    sw a2, 8(sp)
+    sw a3, 12(sp)
+    sw a4, 16(sp)
+    sw a5, 20(sp)
+    sw a6, 24(sp)
+    sw a7, 28(sp)
+    sw t0, 32(sp)
+    sw t1, 36(sp)
+    sw t2, 40(sp)
+    sw t3, 44(sp)
+    sw t4, 48(sp)
+    sw t5, 52(sp)
+    sw t6, 56(sp)
+    
+    // dispatch to correct exception handler
+    csrr t0, mcause
+    li t1, 11
+    bltu t1, t0, isr_unhandled_exc
+
+    la t1, __exception_table
+    sh2add t0, t0, t1
+    lw t0, (t0)
+    jalr t0
+
+    // restore caller-saved registers
+    lw t6, 56(sp)
+    lw t5, 52(sp)
+    lw t4, 48(sp)
+    lw t3, 44(sp)
+    lw t2, 40(sp)
+    lw t1, 36(sp)
+    lw t0, 32(sp)
+    lw a7, 28(sp)
+    lw a6, 24(sp)
+    lw a5, 20(sp)
+    lw a4, 16(sp)
+    lw a3, 12(sp)
+    lw a2, 8(sp)
+    lw a1, 4(sp)
+    lw a0, 0(sp)
+
+    addi sp, sp, 60
+    // restore ra and clear mcause
+    csrrw ra, mcause, zero
+    ret
+```
+
+Also defined is the exception table, containing addresses of exception handlers:
+
+```
+.p2align 2
+.global __exception_table
+__exception_table:
+.word isr_inst_align_exc        // mcause = 0
+.word isr_inst_access_exc       // mcause = 1
+.word isr_inst_illegal_exc      // mcause = 2
+.word isr_inst_ebreak_exc       // mcause = 3
+.word isr_load_align_exc        // mcause = 4
+.word isr_load_access_exc       // mcause = 5
+.word isr_store_align_exc       // mcause = 6
+.word isr_store_access_exc      // mcause = 7
+.word isr_env_umode_exc         // mcause = 8
+.word isr_env_smode_exc         // mcause = 9
+.word isr_unhandled_exc         // mcause = 10 (reserved)
+.word isr_env_mmode_exc         // mcause = 11
+// NOTE: mcause > 11 should be isr_unhandled_exc
+```
+
+And finally a macro plus a weak definition of the corresponding handlers:
+
+```
+.macro weak_def name
+.weak \name
+\name:
+    ebreak
+.endm
+
+weak_def isr_inst_align_exc
+weak_def isr_inst_access_exc
+weak_def isr_inst_illegal_exc
+weak_def isr_inst_ebreak_exc
+weak_def isr_load_align_exc
+weak_def isr_load_access_exc
+weak_def isr_store_align_exc
+weak_def isr_store_access_exc
+weak_def isr_env_umode_exc
+weak_def isr_env_smode_exc
+weak_def isr_env_mmode_exc
+
+.global isr_unhandled_exc
+isr_unhandled_exc:
+    ebreak
+    // for now, go to jail
+    j jail
+```
+
+Assuming our debugger doesn't get messed up, this should let us break at the
+handler for the appropriate exception. Later, when we actually want to handle
+the exceptions, we can override this definition. But for now, we can test that
+the appropriate exception handler is reached. In a new "user" project, write
+a program that attempts to load from a misaligned address:
+
+```c
+unsigned long load_align_fault();
+int main() {
+    load_align_fault();
+    return 0;
+}
+
+unsigned long load_align_fault() {
+    return *(unsigned long *)0x10000001;
+}
+```
+
+Then, run `make run APP=test_exception` (or whatever app name you chose). In
+gdb, you should end up in the appropriate spot:
+
+```
+Thread 1 "rp2350.dap.core0" received signal SIGTRAP, Trace/breakpoint trap.
+isr_load_align_exc () at kernel/startup.S:289
+289     weak_def isr_load_align_exc
+```
+
+I included a few other simple tests in `user/test_exception/main.c`.
+
+#### Software Interrupt Handling
+
+We must also handle software interrupts (`isr_msi`). Here's what the RISC-V
+privileged ISA has to say about software interrupts:
+
+#### Timer Interrupt Handling
+
+We must also handle timer interrupts (`isr_mti`). Here's what the RISC-V
+privileged ISA has to say about timer interrupts:
+
+#### External Interrupt Hanlding
+
+We must also handle timer interrupts (`isr_mei`). Here's what the RISC-V
+privileged ISA has to say about external interrupts:
+
+The Xh3irq is an "extension" that is _"architected as a layer on top of the
+standard `mip.meip` external interrupt line"_ [3]. Recall from the RISC-V spec
+that `mip.meip` represents the machine external interrupt pending vector. thus
+what follows relates to the handling of "machine external interrupts", and does
+not necessarily affect timer and software interrupts.
+
 
 # References
 

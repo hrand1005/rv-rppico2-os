@@ -5,6 +5,8 @@
  */
 
 /**
+ * @brief Entry-point routine first called by the bootrom.
+ *
  * This entry point will be located at the binary's the lowest address.
  * It is the first thing the bootrom will execute after interpreting the
  * metadata in the image definition.
@@ -15,24 +17,23 @@ _entry_point:
     j _reset_handler
 
 _reset_handler:
-    /* TODO: load global pointer */
-
-    /* send core1 to jail if executing */
+    // send core1 to jail if executing
     csrr a0, mhartid
     bnez a0, jail
 
-    /* initialize the stack pointer */
+    // initialize the stack pointer
     la sp, __stack0_base
 
-    /* mount the vector table */
+    // for now, we'll use mscratch content to detect nested exceptions
+    csrw mscratch, zero
+
+    // mount the vector table
     la a0, __vector_table
     ori a0, a0, 1
     csrw mtvec, a0
 
-    /*
-     * initialize xip, load secondary bootloader from flash if necessary
-     * BOOTRAM_BASE = 0x400e0000
-     */
+    // initialize xip, load secondary bootloader from flash if necessary
+    // BOOTRAM_BASE = 0x400e0000
     mv a0, sp 
     addi sp, sp, -256
     mv a1, sp
@@ -45,16 +46,14 @@ copy_xip_fn:
     addi a1, a1, 4
     bltu a1, a0, copy_xip_fn
 
-    /* execute xip setup function */
+    // execute xip setup function
     jalr sp
     addi sp, sp, 256
 
-    /* init .data section (copy from flash to RAM) */
-    
+    // init .data section (copy from flash to RAM)
     la a0, __data_load_start
     la a1, __data_start
     la a2, __data_end
-
 copy_data:
     beq a1, a2, copy_data_end
     lw a3, (a0)
@@ -62,81 +61,56 @@ copy_data:
     addi a0, a0, 4
     addi a1, a1, 4
     j copy_data
-
 copy_data_end:
-    /* done */
 
-    /* zero .bss section */
-    
+    // zero .bss section
     la a0, __bss_start
     la a1, __bss_end
-
 zero_bss:
     beq a0, a1, zero_bss_end
     sw zero, (a0)
     addi a0, a0, 4
     j zero_bss
-
 zero_bss_end:
-    /* done */
 
-    /*
-     * clear all IRQ enable array bits
-     * NOTE: apparently this is done automatically on reset
-     * However, if you had to, you could add this to the following loop:
-     *
-     * csrw 0xbe0u, a0  /* RVCSR_MEIEA_OFFSET _u(0x00000be0)
-     */
-
-    /*
-     * clear all IRQ force array bits
-     * 32 iters * 16 bits = 512 bits cleared.
-     * NOTE: MEIFA offset = 0xbe2
-     */
+    // clear all IRQ force array bits
+    // 32 iters * 16 bits = 512 bits cleared.
+    // NOTE: MEIFA offset = 0xbe2
     li a0, 32
 clear_meip:
     csrw 0xbe2u, a0 
     addi a0, a0, -1
     bgtz a0, clear_meip
     
-    /* enable external interrupts */
+    // enable external interrupts
 
-    /*
-     * enable mie.meie
-     * NOTE: 0x800u = cause 11 (MEIE)
-     * NOTE: MIE at offset 0x304, so that could work too, apparently
-     */
+    // enable mie.meie
+    // NOTE: 0x800u = cause 11 (MEIE)
     li a0, 0x800u
     csrw mie, a0
 
-    /*
-     * enable mstatus.mie
-     * NOTE: MSTATUS at offset 0x300, so that could work too, apparently
-     * NOTE: 0x8u = Bit 3 (represents mie in mstatus)
-     */
+    // enable mstatus.mie
+    // NOTE: 0x8u = Bit 3 (represents mie in mstatus)
     csrsi mstatus, 0x8u
 
-    /*
-     * clear mscratch, which detects nested machine exceptions
-     */
-    csrw mscratch, zero
+    // test machine enabled interrupts:
+    // j test_mei_irq0
 
-    /* test machine enabled interrupts */
-    /* j test_mei_irq0 */
-
+    // TODO: launch main properly
     j main
 
-    /* program ends */
+    // program ends
     ebreak
 
 jail:
-    /* we should never get here */
+    // loop and breakpoint indefinitely
     ebreak
     j jail
 
 
 /**
- * Tests external interrupts (cause 11, IRQ 1)
+ * @brief Tests external interrupts (cause 11, IRQ 1)
+ * TODO: move this into a test file or directory, or delete it.
  */
 test_mei_irq0:
     /* First, enable the corresponding mei IRQ number, let's say IRQ 1
@@ -165,45 +139,101 @@ test_mei_irq0:
      * literal will force an interrupt.
      */
     csrw 0xbe2u, a0
-
     fence.i
-
-    /* We shouldn't make it this far, so go to jail */
+    // We shouldn't make it this far, so go to jail
     j jail
 
 
 /**
+ * @brief Vector table, used for trap handling.
  * Note that in 'Vectored' mode, the vector table must be 64 byte aligned.
  * See rp2350 datasheet section 3.8.4.2.1
  * See riscv-privileged-20211203 section 3.1.7
  */
+.p2align 6
 .section .vectors, "ax"
 __vector_table:
 
-/* disable compressed instructions */
+// disable compressed instructions
 .option push
 .option norvc
 .option norelax
 
-j isr_exc      /* BASE +  0 */ 
-.word 0        /* BASE +  4 */ 
-.word 0        /* BASE +  8 */ 
-j isr_msi      /* BASE + 12 */ 
-.word 0        /* BASE + 16 */ 
-.word 0        /* BASE + 20 */ 
-.word 0        /* BASE + 24 */ 
-j isr_mti      /* BASE + 28 */ 
-.word 0        /* BASE + 32 */ 
-.word 0        /* BASE + 36 */ 
-.word 0        /* BASE + 40 */ 
-j isr_mei      /* BASE + 44 */ 
+j isr_exc      // BASE +  0 
+.word 0        // BASE +  4 
+.word 0        // BASE +  8 
+j isr_msi      // BASE + 12 
+.word 0        // BASE + 16 
+.word 0        // BASE + 20 
+.word 0        // BASE + 24 
+j isr_mti      // BASE + 28 
+.word 0        // BASE + 32 
+.word 0        // BASE + 36 
+.word 0        // BASE + 40 
+j isr_mei      // BASE + 44 
  
 .option pop
 
-.weak isr_exc
+/**
+ * @brief Handles synchronous exceptions as defined by the RISC-V ISA.
+ * Assumes mscratch is zeroed out on startup, and the register is used
+ * to detect nested exceptions, although in that case the core is halted.
+ */
 isr_exc:
-    ebreak
-    j jail
+    // swap mscratch and ra to detect nested exceptions.
+    // if mscratch (swapped to ra) not zero, we just
+    // nested an exception, and should go to jail.
+    csrrw ra, mscratch, ra
+    bnez ra, jail
+    addi sp, sp, -60
+    // save the remaining caller-saved registers before dispatch
+    sw a0, 0(sp)
+    sw a1, 4(sp)
+    sw a2, 8(sp)
+    sw a3, 12(sp)
+    sw a4, 16(sp)
+    sw a5, 20(sp)
+    sw a6, 24(sp)
+    sw a7, 28(sp)
+    sw t0, 32(sp)
+    sw t1, 36(sp)
+    sw t2, 40(sp)
+    sw t3, 44(sp)
+    sw t4, 48(sp)
+    sw t5, 52(sp)
+    sw t6, 56(sp)
+    
+    // dispatch to correct exception handler
+    csrr t0, mcause
+    li t1, 11
+    bltu t1, t0, isr_unhandled_exc
+
+    la t1, __exception_table
+    sh2add t0, t0, t1
+    lw t0, (t0)
+    jalr t0
+
+    // restore caller-saved registers
+    lw t6, 56(sp)
+    lw t5, 52(sp)
+    lw t4, 48(sp)
+    lw t3, 44(sp)
+    lw t2, 40(sp)
+    lw t1, 36(sp)
+    lw t0, 32(sp)
+    lw a7, 28(sp)
+    lw a6, 24(sp)
+    lw a5, 20(sp)
+    lw a4, 16(sp)
+    lw a3, 12(sp)
+    lw a2, 8(sp)
+    lw a1, 4(sp)
+    lw a0, 0(sp)
+
+    addi sp, sp, 60
+    // restore ra and clear mcause
+    csrrw ra, mcause, zero
+    ret
 
 .weak isr_msi
 isr_msi:
@@ -221,7 +251,57 @@ isr_mei:
     j jail
 
 /**
- * This is the initial IMAGE_DEF item.
+ * @brief Exception table, for dispatching ISRs based on mcause for
+ *        synchronous exceptions.
+ * @see RISC-V Privileged ISA Spec 3.1.15 
+ */
+.p2align 2
+.global __exception_table
+__exception_table:
+.word isr_inst_align_exc        // mcause = 0
+.word isr_inst_access_exc       // mcause = 1
+.word isr_inst_illegal_exc      // mcause = 2
+.word isr_inst_ebreak_exc       // mcause = 3
+.word isr_load_align_exc        // mcause = 4
+.word isr_load_access_exc       // mcause = 5
+.word isr_store_align_exc       // mcause = 6
+.word isr_store_access_exc      // mcause = 7
+.word isr_env_umode_exc         // mcause = 8
+.word isr_env_smode_exc         // mcause = 9
+.word isr_unhandled_exc         // mcause = 10 (reserved)
+.word isr_env_mmode_exc         // mcause = 11
+// NOTE: mcause > 11 should be isr_unhandled_exc
+
+/**
+ * @brief Weak definitions of exception ISRs.
+ * Assume the debugger will help with breakpoints for now.
+ */
+.macro weak_def name
+.weak \name
+\name:
+    ebreak
+.endm
+
+weak_def isr_inst_align_exc
+weak_def isr_inst_access_exc
+weak_def isr_inst_illegal_exc
+weak_def isr_inst_ebreak_exc
+weak_def isr_load_align_exc
+weak_def isr_load_access_exc
+weak_def isr_store_align_exc
+weak_def isr_store_access_exc
+weak_def isr_env_umode_exc
+weak_def isr_env_smode_exc
+weak_def isr_env_mmode_exc
+
+.global isr_unhandled_exc
+isr_unhandled_exc:
+    ebreak
+    // for now, go to jail
+    j jail
+
+/**
+ * @brief Initial IMAGE_DEF item.
  * See rp2350 datasheet section 5.9.3.1 (IMAGE_DEF)
  * See rp2350 datasheet section 5.9.5.2 (Minimum Viable Image Definition)
  *
@@ -238,4 +318,3 @@ isr_mei:
 .word 0x000001ff
 .word 0x00000000
 .word 0xab123579
-
