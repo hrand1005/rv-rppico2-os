@@ -1281,6 +1281,113 @@ isr_soft_irq () at kernel/startup.S:372
 We must also handle timer interrupts (`isr_mti`). Here's what the RISC-V
 privileged ISA has to say about timer interrupts:
 
+This shouldn't be too different from the software interrupt. We'll follow
+the same procedure and define a weak handler so that we can decide what to do
+later by defining a c handler for timer interrupts. 
+
+```
+isr_mti:
+    // push caller-saved
+    addi sp, sp, -64
+    sw ra, 0(sp)
+    sw a0, 4(sp)
+    sw a1, 8(sp)
+    sw a2, 12(sp)
+    sw a3, 16(sp)
+    sw a4, 20(sp)
+    sw a5, 24(sp)
+    sw a6, 28(sp)
+    sw a7, 32(sp)
+    sw t0, 36(sp)
+    sw t1, 40(sp)
+    sw t2, 44(sp)
+    sw t3, 48(sp)
+    sw t4, 52(sp)
+    sw t5, 56(sp)
+    sw t6, 60(sp)
+
+    jal isr_mtimer_irq
+
+    // restore caller-saved
+    lw t6, 60(sp)
+    lw t5, 56(sp)
+    lw t4, 52(sp)
+    lw t3, 48(sp)
+    lw t2, 44(sp)
+    lw t1, 40(sp)
+    lw t0, 36(sp)
+    lw a7, 32(sp)
+    lw a6, 28(sp)
+    lw a5, 24(sp)
+    lw a4, 20(sp)
+    lw a3, 16(sp)
+    lw a2, 12(sp)
+    lw a1, 8(sp)
+    lw a0, 4(sp)
+    lw ra, 0(sp)
+    addi sp, sp, 64
+
+    mret
+
+// ...
+
+weak_def isr_mtimer_irq
+```
+
+Note that for the RISC-V architecture's timer registers `mtime` and `mtimecmp`,
+these hold 64-bit values even in 32 bit architectures. Thus they are implemented
+by multiple registers in the rp2350.
+
+For completeness (and so that we understand how the RISC-V architecture works)
+let's still write a test for our implementation. From the rp2350 spec on
+writing new timer comparison values:
+
+_"Use the following sequence to write a new 64-bit timer comparison value
+without causing spurious interrupts:
+1. Write all-ones to MTIMECMP (guaranteed greater than or equal to the old value, and the lower half of the target value).
+2. Write the upper half of the target value to MTIMECMPH(combined 64-bit value is still greater than or equal to the target value).
+3. Write the lower half of the target value to MTIMECMP.
+The RISC-V timer can count either ticks from the system-level tick generator...
+or system clock cycles, selected by the MTIME_CTRL register. Use a 1 microsecond
+time base for compatibility with most RISC_V software."_
+
+So our test can look something like this:
+
+```
+test_mti:
+    // enable timer interrupts (mtie = 0x80)
+    li a0, 0x80u
+    csrs mie, a0
+
+    // set mtime lower and higher half to 0
+    li a0, 0xd00001b0
+    sw zero, 0(a0) // MTIME
+    sw zero, 4(a0) // MTIMEH
+
+    
+    // 1. write all ones to MTIMECMP
+    li a0, 0xd00001b8 // MTIMECMP
+    li a1, 0xffffffff // reset value
+    sw a1, (a0)
+
+    // 2. write value to MTIMECMPH
+    li a0, 0xd00001bc // MTIMECMPH
+    sw zero, (a0)
+
+    // 3. write value to MTIMECMP
+    li a0, 0xd00001b8 // MTIMECMP
+    li a1, 1
+    sw a1, (a0)
+
+    // enable the timer with MTIME_CTRL, set fullspeed with bit 1
+    li a0, 0xd00001a4
+    li a1, 0x3u
+    sw a1, 0(a0)
+
+    fence.i
+    j jail
+```
+
 #### External Interrupt Hanlding
 
 We must also handle timer interrupts (`isr_mei`). Here's what the RISC-V
@@ -1291,6 +1398,46 @@ standard `mip.meip` external interrupt line"_ [3]. Recall from the RISC-V spec
 that `mip.meip` represents the machine external interrupt pending vector. thus
 what follows relates to the handling of "machine external interrupts", and does
 not necessarily affect timer and software interrupts.
+
+#### Other Considerations
+
+As I developed and tested these interrupt handlers, I found that some state
+such as clock values and pending interrupts persisted between runs. Let's 
+make sure that gets zeroed out on startup just like machine external interrupts.
+
+Here's code that resets machine external interrupts, machine software
+interrupts, and timer interrupts:
+
+```
+    // clear all IRQ force array bits
+    // 32 iters * 16 bits = 512 bits cleared.
+    // NOTE: MEIFA offset = 0xbe2
+    li a0, 32
+clear_meip:
+    csrw 0xbe2u, a0 
+    addi a0, a0, -1
+    bgtz a0, clear_meip
+
+    // clear software interrupts in core0 and core1, if pending
+clear_msip:
+    // SIO_BASE                 = 0xd0000000
+    // RISCV_SOFTIRQ Offset     = 0x1a0
+    li a1, 0xd00001a0 
+    li a2, 0x300u
+    sw a2, 0(a1)
+
+    // clear timer interrupts and reset clocks
+clear_mtip:
+    // disable timer
+    li a0, 0xd00001a4 // MTIME_CTRL
+    sw zero, (a0)
+    // set mtime to zero
+    li a0, 0xd00001b0 // MTIME
+    sw zero, (a0)
+    sw zero, 4(a0)    // MTIMEH
+```
+
+Pretty straightforward stuff.
 
 # References
 

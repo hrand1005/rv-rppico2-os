@@ -81,6 +81,24 @@ clear_meip:
     csrw 0xbe2u, a0 
     addi a0, a0, -1
     bgtz a0, clear_meip
+
+    // clear software interrupts in core0 and core1, if pending
+clear_msip:
+    // SIO_BASE                 = 0xd0000000
+    // RISCV_SOFTIRQ Offset     = 0x1a0
+    li a1, 0xd00001a0 
+    li a2, 0x300u
+    sw a2, 0(a1)
+
+    // clear timer interrupts and reset clocks
+clear_mtip:
+    // disable timer
+    li a0, 0xd00001a4 // MTIME_CTRL
+    sw zero, (a0)
+    // set mtime to zero
+    li a0, 0xd00001b0 // MTIME
+    sw zero, (a0)
+    sw zero, 4(a0)    // MTIMEH
     
     // enable external interrupts
 
@@ -93,12 +111,14 @@ clear_meip:
     // NOTE: 0x8u = Bit 3 (represents mie in mstatus)
     csrsi mstatus, 0x8u
 
-    // TODO: move these
     // test machine external interrupts:
     // j test_mei_irq0
     
     // test software interrupts:
     // j test_msi
+
+    // test timer interrupts:
+    // j test_mti
 
     jal main
 
@@ -156,7 +176,7 @@ test_msi:
     // enable software interrupts (msie = 0x8 in mie)
     csrsi mie, 0x8u
 
-    // Set the appropriate bit in RISCV_SOFTIRQ
+    // set the appropriate bit in RISCV_SOFTIRQ
     // SIO_BASE                 = 0xd0000000
     // RISCV_SOFTIRQ Offset     = 0x1a0
     li a1, 0xd00001a0 
@@ -165,6 +185,44 @@ test_msi:
 
     fence.i
     j jail
+
+/**
+ * @brief Tests timer interrupts (cause 7).
+ * TODO: move this into a test file or directory or delete it.
+ */
+test_mti:
+    // enable timer interrupts (mtie = 0x80)
+    li a0, 0x80u
+    csrs mie, a0
+
+    // set mtime lower and higher half to 0
+    li a0, 0xd00001b0
+    sw zero, 0(a0) // MTIME
+    sw zero, 4(a0) // MTIMEH
+
+    
+    // 1. write all ones to MTIMECMP
+    li a0, 0xd00001b8 // MTIMECMP
+    li a1, 0xffffffff // reset value
+    sw a1, (a0)
+
+    // 2. write value to MTIMECMPH
+    li a0, 0xd00001bc // MTIMECMPH
+    sw zero, (a0)
+
+    // 3. write value to MTIMECMP
+    li a0, 0xd00001b8 // MTIMECMP
+    li a1, 1
+    sw a1, (a0)
+
+    // enable the timer with MTIME_CTRL, set fullspeed with bit 1
+    li a0, 0xd00001a4
+    li a1, 0x3u
+    sw a1, 0(a0)
+
+    fence.i
+    j jail
+
 
 /**
  * @brief Vector table, used for trap handling.
@@ -260,8 +318,6 @@ isr_exc:
     // the faulting address should not be re-executed
     mret
 
-.weak isr_msi
-
 /**
  * @brief Handles machine software interrupts, triggered by RISCV_SOFTIRQ.
  * This will usually execute when one core wants to interrupt the other.
@@ -309,10 +365,51 @@ isr_msi:
 
     mret
 
-.weak isr_mti
+/**
+ * @brief Handles machine timer interrupts.
+ */
 isr_mti:
-    ebreak
-    j jail
+    // push caller-saved
+    addi sp, sp, -64
+    sw ra, 0(sp)
+    sw a0, 4(sp)
+    sw a1, 8(sp)
+    sw a2, 12(sp)
+    sw a3, 16(sp)
+    sw a4, 20(sp)
+    sw a5, 24(sp)
+    sw a6, 28(sp)
+    sw a7, 32(sp)
+    sw t0, 36(sp)
+    sw t1, 40(sp)
+    sw t2, 44(sp)
+    sw t3, 48(sp)
+    sw t4, 52(sp)
+    sw t5, 56(sp)
+    sw t6, 60(sp)
+
+    jal isr_mtimer_irq
+
+    // restore caller-saved
+    lw t6, 60(sp)
+    lw t5, 56(sp)
+    lw t4, 52(sp)
+    lw t3, 48(sp)
+    lw t2, 44(sp)
+    lw t1, 40(sp)
+    lw t0, 36(sp)
+    lw a7, 32(sp)
+    lw a6, 28(sp)
+    lw a5, 24(sp)
+    lw a4, 20(sp)
+    lw a3, 16(sp)
+    lw a2, 12(sp)
+    lw a1, 8(sp)
+    lw a0, 4(sp)
+    lw ra, 0(sp)
+    addi sp, sp, 64
+
+    mret
 
 .weak isr_mei
 isr_mei:
@@ -370,6 +467,7 @@ isr_unhandled_exc:
     j jail
 
 weak_def isr_soft_irq
+weak_def isr_mtimer_irq
 
 /**
  * @brief Initial IMAGE_DEF item.
