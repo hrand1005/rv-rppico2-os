@@ -63,7 +63,11 @@ docs:
 	@mkdir -p docs
 	doxygen util/Doxyfile
 
+format:
+	find . -name "*.c" -o -name "*.h" | xargs clang-format -i
+
 clean:
 	rm -rf build/* docs/html/* docs/latex/* init.gdb
 
-.PHONY: docs run compile console check clean
+
+.PHONY: docs run compile console check clean format

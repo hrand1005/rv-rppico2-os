@@ -9,3 +9,6 @@ Here are some things I'd like to try:
 ordering to saving caller saved registers for dealing with PMP exceptions, try
 to understand what this is about.
 - In exception / interrupt handling -- should we save floating point regs?
+- When we initialize a multi-core runtime, we will probably want to enable machine software interrupts via `mie.msie`: `csrsi mie, 0x8u`
+
+

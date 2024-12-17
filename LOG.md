@@ -1078,9 +1078,9 @@ isr_exc:
     lw a0, 0(sp)
 
     addi sp, sp, 60
-    // restore ra and clear mcause
-    csrrw ra, mcause, zero
-    ret
+    // restore ra and clear mscratch
+    csrrw ra, mscratch, zero
+    mret
 ```
 
 Also defined is the exception table, containing addresses of exception handlers:
@@ -1163,8 +1163,118 @@ I included a few other simple tests in `user/test_exception/main.c`.
 
 #### Software Interrupt Handling
 
-We must also handle software interrupts (`isr_msi`). Here's what the RISC-V
-privileged ISA has to say about software interrupts:
+We must also handle machine software interrupts (`isr_msi`). The RISC-V
+privileged isa isn't very explicit about what software interrupts are used for,
+but in discussions of interrupt priorities it is implied that they are used
+for inter-processor messaging. From the aside at the end of 3.1.9:
+
+_"Software interrupts are handled before internal timer interrupts, because
+internal timer interrupts are usually intended for time slicing, where time
+precision is less important, whereas software interrupts are used for 
+inter-process messaging."_ [3]
+
+From the rp2350 datasheet section 3.8.4.2.1, we can see specifically how
+`mip.msip` is used:
+
+_"The standard software interrupt MIP.MSIP connects to the RISCV_SOFTIRQ
+register in the SIO subsystem. The register has a single bit per hart, which
+asserts the soft IRQ interrupt to that hart. This can be used to interrupt the
+other hart, or to interrupt yourself as though the other hart had interrupted
+you, which can help to make handler code more symmetric. On RP2350 there is a
+one-to-one correspondence between harts and cores, so you could equivalently
+say there is one soft IRQ per core."_ [3]
+
+So `isr_msi` will fire when the appropriate bit is set in the RISCV_SOFTIRQ
+control register, and it is designed primarily for cores to interrupt one
+another, although we write the software and thus ultimately decide the
+conditions under which these interrupts occur. Hence software interrupt.
+
+It wouldn't appear that there's much unique work to be done here yet, but we
+can at least set up a generic interrupt handler that dispatches to a weak
+definition of an isr so that we know things are working as expected. 
+
+```
+isr_msi:
+    // push caller-saved
+    addi sp, sp, -64
+    sw ra, 0(sp)
+    sw a0, 4(sp)
+    sw a1, 8(sp)
+    sw a2, 12(sp)
+    sw a3, 16(sp)
+    sw a4, 20(sp)
+    sw a5, 24(sp)
+    sw a6, 28(sp)
+    sw a7, 32(sp)
+    sw t0, 36(sp)
+    sw t1, 40(sp)
+    sw t2, 44(sp)
+    sw t3, 48(sp)
+    sw t4, 52(sp)
+    sw t5, 56(sp)
+    sw t6, 60(sp)
+
+    jal isr_soft_irq
+
+    // restore caller-saved
+    lw t6, 60(sp)
+    lw t5, 56(sp)
+    lw t4, 52(sp)
+    lw t3, 48(sp)
+    lw t2, 44(sp)
+    lw t1, 40(sp)
+    lw t0, 36(sp)
+    lw a7, 32(sp)
+    lw a6, 28(sp)
+    lw a5, 24(sp)
+    lw a4, 20(sp)
+    lw a3, 16(sp)
+    lw a2, 12(sp)
+    lw a1, 8(sp)
+    lw a0, 4(sp)
+    lw ra, 0(sp)
+    addi sp, sp, 64
+
+    mret
+```
+
+And a weak definition for `isr_soft_irq`:
+
+```
+weak_def isr_soft_irq
+```
+
+Since we're obeying the calling convention, we can later define this function
+as a C handler if we so please, just like the exception isrs. Although we
+haven't initialized core1 yet, we can still pend an interrupt on ourselves from
+core0 to ensure the handler gets executed as expected. Note that when we
+want to initialize a multi-processor runtime, we'll need to enable this software
+interrupt via `mie.msie` as shown in this test.
+
+```
+test_msi:
+    // enable software interrupts (msie = 0x8 in mie)
+    csrsi mie, 0x8u
+
+    // Set the appropriate bit in RISCV_SOFTIRQ
+    // SIO_BASE                 = 0xd0000000
+    // RISCV_SOFTIRQ Offset     = 0x1a0
+    li a1, 0xd00001a0 
+    li a2, 1
+    sw a2, 0(a1)
+
+    fence.i
+    j jail
+```
+
+If we jump to `test_msi` somewhere after our setup, we can see that we land in
+the software interrupt isr in gdb:
+
+```
+Thread 1 "rp2350.dap.core0" received signal SIGTRAP, Trace/breakpoint trap.
+isr_soft_irq () at kernel/startup.S:372
+372     weak_def isr_soft_irq
+```
 
 #### Timer Interrupt Handling
 
@@ -1181,7 +1291,6 @@ standard `mip.meip` external interrupt line"_ [3]. Recall from the RISC-V spec
 that `mip.meip` represents the machine external interrupt pending vector. thus
 what follows relates to the handling of "machine external interrupts", and does
 not necessarily affect timer and software interrupts.
-
 
 # References
 

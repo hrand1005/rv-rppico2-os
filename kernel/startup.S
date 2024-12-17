@@ -93,11 +93,14 @@ clear_meip:
     // NOTE: 0x8u = Bit 3 (represents mie in mstatus)
     csrsi mstatus, 0x8u
 
-    // test machine enabled interrupts:
+    // TODO: move these
+    // test machine external interrupts:
     // j test_mei_irq0
+    
+    // test software interrupts:
+    // j test_msi
 
-    // TODO: launch main properly
-    j main
+    jal main
 
     // program ends
     ebreak
@@ -140,9 +143,28 @@ test_mei_irq0:
      */
     csrw 0xbe2u, a0
     fence.i
+
     // We shouldn't make it this far, so go to jail
     j jail
 
+
+/**
+ * @brief Tests software interrupts (cause 3, set by RISSCV_SOFTIRQ)
+ * TODO: move this into a test file or directory or delete it.
+ */
+test_msi:
+    // enable software interrupts (msie = 0x8 in mie)
+    csrsi mie, 0x8u
+
+    // Set the appropriate bit in RISCV_SOFTIRQ
+    // SIO_BASE                 = 0xd0000000
+    // RISCV_SOFTIRQ Offset     = 0x1a0
+    li a1, 0xd00001a0 
+    li a2, 1
+    sw a2, 0(a1)
+
+    fence.i
+    j jail
 
 /**
  * @brief Vector table, used for trap handling.
@@ -231,14 +253,61 @@ isr_exc:
     lw a0, 0(sp)
 
     addi sp, sp, 60
-    // restore ra and clear mcause
-    csrrw ra, mcause, zero
-    ret
+    // restore ra and clear mscratch
+    csrrw ra, mscratch, zero
+
+    // NOTE: it is up to the handler to change mepc if
+    // the faulting address should not be re-executed
+    mret
 
 .weak isr_msi
+
+/**
+ * @brief Handles machine software interrupts, triggered by RISCV_SOFTIRQ.
+ * This will usually execute when one core wants to interrupt the other.
+ */
 isr_msi:
-    ebreak
-    j jail
+    // push caller-saved
+    addi sp, sp, -64
+    sw ra, 0(sp)
+    sw a0, 4(sp)
+    sw a1, 8(sp)
+    sw a2, 12(sp)
+    sw a3, 16(sp)
+    sw a4, 20(sp)
+    sw a5, 24(sp)
+    sw a6, 28(sp)
+    sw a7, 32(sp)
+    sw t0, 36(sp)
+    sw t1, 40(sp)
+    sw t2, 44(sp)
+    sw t3, 48(sp)
+    sw t4, 52(sp)
+    sw t5, 56(sp)
+    sw t6, 60(sp)
+
+    jal isr_soft_irq
+
+    // restore caller-saved
+    lw t6, 60(sp)
+    lw t5, 56(sp)
+    lw t4, 52(sp)
+    lw t3, 48(sp)
+    lw t2, 44(sp)
+    lw t1, 40(sp)
+    lw t0, 36(sp)
+    lw a7, 32(sp)
+    lw a6, 28(sp)
+    lw a5, 24(sp)
+    lw a4, 20(sp)
+    lw a3, 16(sp)
+    lw a2, 12(sp)
+    lw a1, 8(sp)
+    lw a0, 4(sp)
+    lw ra, 0(sp)
+    addi sp, sp, 64
+
+    mret
 
 .weak isr_mti
 isr_mti:
@@ -299,6 +368,8 @@ isr_unhandled_exc:
     ebreak
     // for now, go to jail
     j jail
+
+weak_def isr_soft_irq
 
 /**
  * @brief Initial IMAGE_DEF item.
