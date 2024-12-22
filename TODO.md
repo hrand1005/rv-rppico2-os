@@ -13,3 +13,4 @@ to understand what this is about.
 - When implementing kernel / user spaces, we will need user stack(s)
 - Start sticking registers in a `.h` file for use in `startup.S`.
 - During runtime initialization, if necessary, enable timer interrupts with `mie.mtie`
+- profile and possibly implement last-chance check of IRQ before exiting `isr_mei`

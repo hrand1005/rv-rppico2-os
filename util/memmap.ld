@@ -42,37 +42,36 @@ SECTIONS
         KEEP (*(.image_def))
         __image_def_end = .;
         __text_start = .;
-        *(.text)
+        *(.text*)
         __text_end = .;
     } > FLASH
 
-    .data : {
-        . = ALIGN(4);
-        __data_load_start = LOADADDR(.data);
+    .data : ALIGN(4) {
         __data_start = .;
-        *(.data)
+        *(.data*)
+        *(.sdata*)
         __data_end = .;
     } > RAM AT > FLASH
+    __data_load_start = LOADADDR(.data);
 
-    .rodata : {
-        . = ALIGN(4);
+    .rodata : ALIGN(4) {
         __rodata_start = .;
-        *(.rodata)
+        *(.rodata*)
         __rodata_end = .;
     } > FLASH
 
-    .bss (NOLOAD) : {
-        . = ALIGN(4);
+    .bss (NOLOAD) : ALIGN(4) {
         __bss_start = .;
-        *(.bss)
+        *(.bss*)
+        *(.sbss*)
         __bss_end = .;
     } > RAM
 
+    __gp = ALIGN((__bss_start + __bss_end) / 2, 4);
+
     /* core 0 */
     __stack0_size = 0x2000;
-    .stack0 (NOLOAD) :
-    {
-        . = ALIGN(4);
+    .stack0 (NOLOAD) : ALIGN(4) {
         __stack0_limit = .;
         . += __stack0_size;
         __stack0_base = .;
@@ -81,9 +80,7 @@ SECTIONS
 
     /* core 1 */
     __stack1_size = 0x2000;
-    .stack1 (NOLOAD) :
-    {
-        . = ALIGN(4);
+    .stack1 (NOLOAD) : ALIGN(4) {
         __stack1_limit = .;
         . += __stack1_size;
         __stack1_base = .;

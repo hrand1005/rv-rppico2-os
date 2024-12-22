@@ -1388,16 +1388,362 @@ test_mti:
     j jail
 ```
 
-#### External Interrupt Hanlding
+#### External Interrupt Handling
 
 We must also handle timer interrupts (`isr_mei`). Here's what the RISC-V
 privileged ISA has to say about external interrupts:
 
-The Xh3irq is an "extension" that is _"architected as a layer on top of the
+The Xh3irq is an **extension** that is _"architected as a layer on top of the
 standard `mip.meip` external interrupt line"_ [3]. Recall from the RISC-V spec
-that `mip.meip` represents the machine external interrupt pending vector. thus
+that `mip.meip` represents the machine external interrupt pending vector. Thus
 what follows relates to the handling of "machine external interrupts", and does
-not necessarily affect timer and software interrupts.
+not affect timer and software interrupts.
+
+The Xh3irq interrupt controller documentation provides a series of control
+status registers intended to support programmable, priority-based interrupts.
+The hardware implements "pre-emption priority logic" but the software still
+dictates how interrupts received via `mip.meip` are dispatched (like the other 
+kinds of interrupts we've been handling). A brief overview of the registers is
+provided at the beginning of 3.8.6.1:
+
+```
+- MEIEA: external interrupt enable array
+- MEIPA: external interrupt pending array
+- MEIFA: external interrupt force array
+- MEIPRA: external interrupt priority array
+- MEINEXT: get next external interrupt
+- MEICONTEXT: external interrupt context register
+```
+
+The "A" suffix in the first four registers represents array -- writes/reads to
+these registers may be used to read/write positions within a 512 bit vector
+representing the enabled, pending, and forced interrupts respectively. The array
+can be thought of as 32 separate slices, each 16 bits, where each bit represents
+one of the 512 priorities of external interrupt. When using one of the registers
+with the "A" suffix, bits [15:0] represent the index of the 16-bit slice and
+[31:16] represent the contents of the array. To write a 1 to bit 0, for example,
+you would write `0x00010000`. Let's say we wanted to enable external interrupt
+number 288. Then, in c: 
+
+```c
+uint32_t lower = (288 / 16);                    // gives index
+uint32_t upper = 1 << (288 % 16);               // gives offset into slice
+*((uint32_t *)0xbe0) = (upper << 16) | lower;   // write 32 bit content to MEIEA
+```
+
+While the interrupt controller appears to support as many as 512 external
+interrupt lines the rp2350 datasheet says that "RP2350 configures Hazard3
+with the Xh3irq interrupt controller, with 52 external interrupt lines and
+16 levels of pre-emption priority." [3]. Thus we should to use only indices
+0 - 3 to get the first four 16-bit windows to cover all external interrupts.
+IRQ numbers 0 through 51 are documented in the rp2350 datasheet section 3.2.
+
+> NOTE: the rp2350 datasheet and the SDK sometimes also refer to machine
+external interrupts as "system interrupts" for some reason. Although, I'm not
+sure whether this maps onto our machine external interrupts 1:1 or if system
+interrupts also encompasses other kinds of interrupts (machine software
+interrupts, machine timer interrupts). 
+
+Two more registers of interest may be used to see the current interrupt
+handling context, plus get the next highest-priority pending machine external
+interrupt. These registers are `MEICONTEXT` and `MEINEXT`. 
+
+`MEICONTEXT` appears to be useful for storing state in case we want to enable
+pre-emption during our system interrupt handling. It contains the information 
+on what the current context is (which IRQ is being serviced), plus which
+interrupt is being preempted, if any, which is useful WHY?
+
+If we want to use it properly, and enable pre-emption, we'll  need to push it
+onto the stack just like our other caller-saved registers, so that it doesn't
+get trashed if it get's pre-empted by a higher priority interrupt.
+
+`MEINEXT` is useful for at least two purposes: one is that we can service 
+machine external interrupts in a priority order by getting the next pending
+interrupt (if any) from this register, and two is that we can use this within
+our generic mei handler to get the next interrupt if it exists before
+returning, thus potentially letting us do interrupt tail calls and eliminating
+the need to repeatedly save and restore context.
+
+> **Question**: what is done for us by hardware upon receiving a machine external
+interrupt?
+**Answer**: See [3] 3.8.6.1.5 for how MEICONTEXT is automatically updated
+            See [3] 3.8.4 Interrupts and Exceptions trap entry sequence
+
+Like our exception table, we can define a similar 
+
+The datasheet actually provides a minimal handler implementation without
+preemption in 3.8.6.1.6. We can use it as a basis for our first draft:
+
+```
+isr_mei:
+    // NOTE: mstatus.mie cleared by hardware, disabling preemption
+    // push caller-saved
+    addi sp, sp, -64
+    sw ra, 0(sp)
+    sw t0, 4(sp)
+    sw t1, 8(sp)
+    sw t2, 12(sp)
+    sw a0, 16(sp)
+    sw a1, 20(sp)
+    sw a2, 24(sp)
+    sw a3, 28(sp)
+    sw a4, 32(sp)
+    sw a5, 36(sp)
+    sw a6, 40(sp)
+    sw a7, 44(sp)
+    sw t3, 48(sp)
+    sw t4, 52(sp)
+    sw t5, 56(sp)
+    sw t6, 60(sp)
+get_first_irq:
+    // read next highest-priority active IRQ (<< 2) from MEINEXT
+    csrr a0, 0xbe4
+    // MSB will be set if there is no active IRQ at the current priority level
+    bltz a0, no_more_irqs
+dispatch_irq:
+    lui a1, %hi(__external_interrupt_table)
+    add a1, a1, a0
+    lw a1, %lo(__external_interrupt_table)(a1)
+    jalr ra, a1
+get_next_irq:
+    // read next-highest-priority IRQ
+    csrr a0, 0xbe4
+    // MSB will be set if there is no active IRQ at the current priority level
+    bgez a0, dispatch_irq
+no_more_irqs:
+    // restore caller-saved
+    lw t6, 60(sp)
+    lw t5, 56(sp)
+    lw t4, 52(sp)
+    lw t3, 48(sp)
+    lw t2, 44(sp)
+    lw t1, 40(sp)
+    lw t0, 36(sp)
+    lw a7, 32(sp)
+    lw a6, 28(sp)
+    lw a5, 24(sp)
+    lw a4, 20(sp)
+    lw a3, 16(sp)
+    lw a2, 12(sp)
+    lw a1, 8(sp)
+    lw a0, 4(sp)
+    lw ra, 0(sp)
+    addi sp, sp, 64
+    mret
+```
+
+Let's write two quick tests to make sure we understand how to use teh sliding
+window for the array registers, plus to ensure we're dispatching everything
+correctly. We'll write one test for IRQ 0 and one for IRQ 44:
+
+```
+/**
+ * @brief Tests external interrupts (cause 11, IRQ 0)
+ */
+test_mei_irq0:
+    /* First, enable the corresponding mei IRQ number, let's say IRQ 0
+     * 
+     * MEIEA Offset: 0x00000be0
+     * Bit key for MEIEA: W=Window, R=Reserved, I=Index
+     * 
+     * WWWW WWWW WWWW WWWW RRRR RRRR RRRI IIII
+     *
+     * So, to set IRQ 0, we need to set the rightmost W to 1.
+     * 
+     * 0000 0000 0000 0001 0000 0000 0000 0000
+     *
+     * Which equals 0x00010000, so let us write this content to MEIEA.
+     * This will _enable_ interrupt request number 0, which is a machine
+     * external interrupt.
+     */
+    li a0, 0x10000
+    csrw 0xbe0, a0
+
+    /* Next, we can create the interrupt request using MEIFA.
+     *
+     * MEIFA Offset: 0x00000be2
+     * 
+     * The register works the same as MEIA, except this time writing the
+     * literal will force an interrupt.
+     */
+    csrw 0xbe2, a0
+    fence.i
+
+    // We shouldn't make it this far, so go to jail
+    j jail
+
+
+/**
+ * @brief Tests external interrupts (cause 11, IRQ 44)
+ */
+test_mei_irq44:
+    /* MEIEA Offset: 0x00000be0
+     * Bit key for MEIEA: W=Window, R=Reserved, I=Index
+     * 
+     * WWWW WWWW WWWW WWWW RRRR RRRR RRRI IIII
+     * 1000 0000 0000 0000 0000 0000 0000 0010
+     */
+    li a0, 0x10000002
+    csrw 0xbe0, a0
+
+    // now set MEIFA, blah blah blah
+    csrw 0xbe2, a0
+    fence.i
+
+    j jail
+```
+
+Great, that appears to work.
+
+Now let's implement preemption. There are some subtleties to what follows, and 
+to be clear I adapted this implementation from the pico-sdk. In the pico sdk
+repo, you can check out `src/rp2_common/pico_crt0/crt0_riscv.S` for the original
+code. Nonetheless, I will rewrite it here, explain it, and then test it.
+
+Firstly, the hardware automatically makes changes to `mepc` and `mstatus` upon
+trap entry (see 3.8.4 Interrupts and Exceptions trap entry sequence). So these
+let's save these by pushing them onto the stack, just like the other
+caller-saved registers:
+
+```
+    csrr a0, mepc
+    csrr a1, mstatus
+    sw a0, 64(sp)
+    sw a1, 68(sp)
+```
+
+We must also remember that the priority of the currently handled IRQ, the
+priority of an IRQ required to preempt the current IRQ, are represented and
+controlled by MEICONTEXT. Additionally, the rp2350 datasheet makes this 
+recommendation in 3.8.6.1.5:
+
+_"To avoid awkward interactions between the MIP.MEIP handler, which should be
+aware of the Xh3irq extension, and the MTIP/MSIP handlers, which may not be,
+it's best to avoid pre-emption of the former by the latter. MEICONTEXT.CLEARTS,
+MTIESAVE and MSIESAVE support disabling and restoring the timer/software
+interrupt enables as part of the MEICONTEXT CSR accesses that take place during
+context save/restore in the MEIP handler."_ [3]
+
+In one instruction, we can save the MITE and MSIE values in our current context
+to MEICONTEXT, read MEICONTEXT to a register (that we will push onto the stack),
+and also clear the machine timer and machine software interrupt enable
+registers to prevent those interrupts from preempting our handler. Then, we can
+push the saved context onto the stack:
+
+```
+save_meicontext:
+    csrrsi a2, 0xbe5, 0x1 // MEICONTEXT, MEICONTEXT.CLEARTS bits
+    sw a2, 72(sp)
+```
+
+Before servicing interrupt requests, we can now enable preemption by setting the
+global `mstatus.mie` within the interrupt handler:
+
+```
+   csrsi mstatus, 0x8
+```
+
+And then disable it while we loop looking for other IRQs to service:
+
+```
+    csrci mstatus, 0x8
+    j get_next_irq
+```
+
+Finally, when we exit, we must remember to restore the MEICONTEXT, mstatus,
+and mepc registers. All together, my implementation of `isr_mei` looks like this:
+
+```
+/**
+ * @brief Handles machine external interrupts without preemption.
+ */
+isr_mei:
+    // NOTE: mstatus.mie automatically cleared by hardware, disabling preemption
+    // push caller-saved
+    addi sp, sp, -76
+    sw ra, 0(sp)
+    sw t0, 4(sp)
+    sw t1, 8(sp)
+    sw t2, 12(sp)
+    sw a0, 16(sp)
+    sw a1, 20(sp)
+    sw a2, 24(sp)
+    sw a3, 28(sp)
+    sw a4, 32(sp)
+    sw a5, 36(sp)
+    sw a6, 40(sp)
+    sw a7, 44(sp)
+    sw t3, 48(sp)
+    sw t4, 52(sp)
+    sw t5, 56(sp)
+    sw t6, 60(sp)
+
+    csrr a0, mepc
+    csrr a1, mstatus
+    sw a0, 64(sp)
+    sw a1, 68(sp)
+
+save_meicontext:
+    csrrsi a2, 0xbe5, 0x1 // MEICONTEXT, MEICONTEXT.CLEARTS bits
+    sw a2, 72(sp)
+
+get_next_irq:
+    // reads next highest priority (IRQ << 2) from MEINEXT into a0 AND
+    // sets MEINEXT.UPDATE to 1, updating MEICONTEXT with this context 
+    csrrsi a0, 0xbe4, 0x1
+    // if MSB set then no more active IRQs for this context
+    bltz a0, no_more_irqs
+dispatch_irq:
+    // enable preemption by setting mstatus.mie
+    csrsi mstatus, 0x8
+
+    lui a1, %hi(__external_interrupt_table)
+    add a1, a1, a0
+    lw a1, %lo(__external_interrupt_table)(a1)
+    jalr ra, a1
+
+    // disable preemption while looking for new IRQ
+    csrci mstatus, 0x8
+    j get_next_irq
+
+no_more_irqs:
+    // restore meicontext, mstatus, mepc
+    lw a2, 72(sp)
+    lw a1, 68(sp)
+    lw a0, 64(sp)
+
+    csrw 0xbe5, a2 // MEICONTEXT
+    csrw mstatus, a1
+    csrw mepc, a0
+
+    // restore caller-saved
+    lw t6, 60(sp)
+    lw t5, 56(sp)
+    lw t4, 52(sp)
+    lw t3, 48(sp)
+    lw t2, 44(sp)
+    lw t1, 40(sp)
+    lw t0, 36(sp)
+    lw a7, 32(sp)
+    lw a6, 28(sp)
+    lw a5, 24(sp)
+    lw a4, 20(sp)
+    lw a3, 16(sp)
+    lw a2, 12(sp)
+    lw a1, 8(sp)
+    lw a0, 4(sp)
+    lw ra, 0(sp)
+
+    addi sp, sp, 76
+    mret
+```
+
+Let's write a tests that checks two aspects of this: 1) lower priority
+IRQs don't preempt ISRs and 2) higher priority IRQs DO preempt ISRs.
+We can write a C source file that overrides the weak definitions of our isrs
+to do this. Here's the [hideous (but functional) test I created](user/test_mei/main.c).
+
+Ok, on the surface everything appears to be in working order.
 
 #### Other Considerations
 
@@ -1410,9 +1756,9 @@ interrupts, and timer interrupts:
 
 ```
     // clear all IRQ force array bits
-    // 32 iters * 16 bits = 512 bits cleared.
+    // 4 iters * 16 bits = 64 bits cleared.
     // NOTE: MEIFA offset = 0xbe2
-    li a0, 32
+    li a0, 4
 clear_meip:
     csrw 0xbe2u, a0 
     addi a0, a0, -1
@@ -1438,6 +1784,14 @@ clear_mtip:
 ```
 
 Pretty straightforward stuff.
+
+### Refactor Crap (?)
+
+As of today, there are a bunch of little tests in the startup source code that
+are making things a bit messy and unnecessarily annoying to navigate. There are
+also a lot of hard coded addresses in the assembly code that are difficult to
+read. Let's just fix that stuff and make a dedicated way to test our kernel
+code.
 
 # References
 
