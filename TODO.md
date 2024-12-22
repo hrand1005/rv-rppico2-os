@@ -11,6 +11,5 @@ to understand what this is about.
 - In exception / interrupt handling -- should we save floating point regs?
 - When we initialize a multi-core runtime, we will probably want to enable machine software interrupts via `mie.msie`: `csrsi mie, 0x8u`
 - When implementing kernel / user spaces, we will need user stack(s)
-- Start sticking registers in a `.h` file for use in `startup.S`.
 - During runtime initialization, if necessary, enable timer interrupts with `mie.mtie`
 - profile and possibly implement last-chance check of IRQ before exiting `isr_mei`

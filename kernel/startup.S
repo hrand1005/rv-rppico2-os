@@ -4,6 +4,8 @@
  * @author Herbie Rand
  */
 
+#include "rp2350.h"
+
 /**
  * @brief Entry-point routine first called by the bootrom.
  *
@@ -21,7 +23,7 @@ _reset_handler:
 
     // send core1 to jail if executing
     csrr a0, mhartid
-    bnez a0, jail
+    bnez a0, _jail
 
     // initialize the stack pointer
     la sp, __stack0_base
@@ -34,12 +36,11 @@ _reset_handler:
     ori a0, a0, 1
     csrw mtvec, a0
 
-    // initialize xip, load secondary bootloader from flash if necessary
-    // BOOTRAM_BASE = 0x400e0000
+    // initialize xip
     mv a0, sp 
     addi sp, sp, -256
     mv a1, sp
-    la a2, 0x400e0000
+    la a2, BOOTRAM_BASE
     
 copy_xip_fn:
     lw a3, (a2)
@@ -80,171 +81,45 @@ zero_bss_end:
     // NOTE: MEIFA offset = 0xbe2
     li a0, 4
 clear_meip:
-    csrw 0xbe2, a0 
+    csrw RVCSR_MEIFA, a0 
     addi a0, a0, -1
     bgtz a0, clear_meip
 
     // clear software interrupts in core0 and core1, if pending
 clear_msip:
-    // SIO_BASE                 = 0xd0000000
-    // RISCV_SOFTIRQ Offset     = 0x1a0
-    li a1, 0xd00001a0 
+    li a1, SIO_RISCV_SOFTIRQ 
     li a2, 0x300
     sw a2, 0(a1)
 
     // clear timer interrupts and reset clocks
 clear_mtip:
     // disable timer
-    li a0, 0xd00001a4 // MTIME_CTRL
+    li a0, SIO_MTIME_CTRL
     sw zero, (a0)
     // set mtime to zero
-    li a0, 0xd00001b0 // MTIME
+    li a0, SIO_MTIME
     sw zero, (a0)
-    sw zero, 4(a0)    // MTIMEH
+    sw zero, 4(a0) // SIO_MTIMEH
     
     // enable external interrupts
 
     // enable mie.meie
-    // NOTE: 0x800 = cause 11 (MEIE)
     li a0, 0x800
     csrw mie, a0
 
     // enable mstatus.mie
-    // NOTE: 0x8 = Bit 3 (represents mie in mstatus)
     csrsi mstatus, 0x8
-
-    // test machine external interrupts:
-    // j test_mei_irq0
-    // j test_mei_irq44
-    
-    // test software interrupts:
-    // j test_msi
-
-    // test timer interrupts:
-    // j test_mti
 
     jal main
 
     // program ends
     ebreak
 
-jail:
+.global _jail
+_jail:
     // loop and breakpoint indefinitely
     ebreak
-    j jail
-
-
-/**
- * @brief Tests external interrupts (cause 11, IRQ 0)
- * TODO: move this into a test file or directory, or delete it.
- */
-test_mei_irq0:
-    /* First, enable the corresponding mei IRQ number, let's say IRQ 0
-     * 
-     * MEIEA Offset: 0x00000be0
-     * Bit key for MEIEA: W=Window, R=Reserved, I=Index
-     * 
-     * WWWW WWWW WWWW WWWW RRRR RRRR RRRI IIII
-     *
-     * So, to set IRQ 0, we need to set the rightmost W to 1.
-     * 
-     * 0000 0000 0000 0001 0000 0000 0000 0000
-     *
-     * Which equals 0x00010000, so let us write this content to MEIEA.
-     * This will _enable_ interrupt request number 0, which is a machine
-     * external interrupt.
-     */
-    li a0, 0x10000
-    csrw 0xbe0, a0
-
-    /* Next, we can create the interrupt request using MEIFA.
-     *
-     * MEIFA Offset: 0x00000be2
-     * 
-     * The register works the same as MEIA, except this time writing the
-     * literal will force an interrupt.
-     */
-    csrw 0xbe2, a0
-    fence.i
-
-    // We shouldn't make it this far, so go to jail
-    j jail
-
-
-/**
- * @brief Tests external interrupts (cause 11, IRQ 44)
- */
-test_mei_irq44:
-    /* MEIEA Offset: 0x00000be0
-     * Bit key for MEIEA: W=Window, R=Reserved, I=Index
-     * 
-     * WWWW WWWW WWWW WWWW RRRR RRRR RRRI IIII
-     * 1000 0000 0000 0000 0000 0000 0000 0010
-     */
-    li a0, 0x10000002
-    csrw 0xbe0, a0
-
-    // now set MEIFA, blah blah blah
-    csrw 0xbe2, a0
-    fence.i
-
-    j jail
-
-
-/**
- * @brief Tests software interrupts (cause 3, set by RISSCV_SOFTIRQ)
- * TODO: move this into a test file or directory or delete it.
- */
-test_msi:
-    // enable software interrupts (msie = 0x8 in mie)
-    csrsi mie, 0x8
-
-    // set the appropriate bit in RISCV_SOFTIRQ
-    // SIO_BASE                 = 0xd0000000
-    // RISCV_SOFTIRQ Offset     = 0x1a0
-    li a1, 0xd00001a0 
-    li a2, 1
-    sw a2, 0(a1)
-
-    fence.i
-    j jail
-
-/**
- * @brief Tests timer interrupts (cause 7).
- * TODO: move this into a test file or directory or delete it.
- */
-test_mti:
-    // enable timer interrupts (mtie = 0x80)
-    li a0, 0x80
-    csrs mie, a0
-
-    // set mtime lower and higher half to 0
-    li a0, 0xd00001b0
-    sw zero, 0(a0) // MTIME
-    sw zero, 4(a0) // MTIMEH
-
-    
-    // 1. write all ones to MTIMECMP
-    li a0, 0xd00001b8 // MTIMECMP
-    li a1, 0xffffffff // reset value
-    sw a1, (a0)
-
-    // 2. write value to MTIMECMPH
-    li a0, 0xd00001bc // MTIMECMPH
-    sw zero, (a0)
-
-    // 3. write value to MTIMECMP
-    li a0, 0xd00001b8 // MTIMECMP
-    li a1, 1
-    sw a1, (a0)
-
-    // enable the timer with MTIME_CTRL, set fullspeed with bit 1
-    li a0, 0xd00001a4
-    li a1, 0x3
-    sw a1, 0(a0)
-
-    fence.i
-    j jail
+    j _jail
 
 
 /**
@@ -287,7 +162,7 @@ isr_exc:
     // if mscratch (swapped to ra) not zero, we just
     // nested an exception, and should go to jail.
     csrrw ra, mscratch, ra
-    bnez ra, jail
+    bnez ra, _jail
     addi sp, sp, -60
     // save the remaining caller-saved registers before dispatch
     sw a0, 0(sp)
@@ -464,13 +339,13 @@ isr_mei:
     sw a1, 68(sp)
 
 save_meicontext:
-    csrrsi a2, 0xbe5, 0x1 // MEICONTEXT, MEICONTEXT.CLEARTS bits
+    csrrsi a2, RVCSR_MEICONTEXT, 0x2 // CLEARTS bits
     sw a2, 72(sp)
 
 get_next_irq:
     // reads next highest priority (IRQ << 2) from MEINEXT into a0 AND
     // sets MEINEXT.UPDATE to 1, updating MEICONTEXT with this context 
-    csrrsi a0, 0xbe4, 0x1
+    csrrsi a0, RVCSR_MEINEXT, 0x1
     // if MSB set then no more active IRQs for this context
     bltz a0, no_more_irqs
 dispatch_irq:
@@ -493,7 +368,7 @@ no_more_irqs:
     lw a1, 68(sp)
     lw a0, 64(sp)
 
-    csrw 0xbe5, a2 // MEICONTEXT
+    csrw RVCSR_MEICONTEXT, a2
     csrw mstatus, a1
     csrw mepc, a0
 
@@ -628,7 +503,7 @@ weak_def isr_env_mmode_exc
 isr_unhandled_exc:
     ebreak
     // for now, go to jail
-    j jail
+    j _jail
 
 /* NOTE: msi dispatch */
 weak_def isr_soft_irq

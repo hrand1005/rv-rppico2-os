@@ -1,5 +1,5 @@
-APP ?= blinky
-TARGET := build/$(APP).elf
+APP ?= $(if $(TEST),,blinky)
+TARGET := $(if $(TEST),build/$(TEST).elf,build/$(APP).elf)
 
 MEMMAP := util/memmap.ld
 
@@ -22,28 +22,34 @@ KERNEL_DIR := kernel
 KERNEL_SRCS := $(wildcard $(KERNEL_DIR)/*.c $(KERNEL_DIR)/*.S)
 KERNEL_OBJ := $(BUILD_DIR)/kernel.o
 
-USER_DIR := user/$(APP)
-USER_SRCS := $(wildcard $(USER_DIR)/*.c $(USER_DIR)/*.S)
-USER_OBJ := $(BUILD_DIR)/user_$(APP).o
+PROGRAM_DIR := $(if $(TEST),test/$(TEST),user/$(APP))
+PROGRAM_SRCS := $(wildcard $(PROGRAM_DIR)/*.c $(PROGRAM_DIR)/*.S)
+PROGRAM_OBJ := $(BUILD_DIR)/$(if $(TEST),test_$(TEST),user_$(APP)).o
 
 GDB_TEMPLATE := util/gdb_template
 
-.DEFAULT_GOAL := compile
+.DEFAULT_GOAL := run
 
-run: $(TARGET) $(GDB_TEMPLATE)
+run: $(GDB_TEMPLATE)
+	@if [ -n "$(TEST)" ] && [ -n "$(APP)" ]; then \
+		echo "Error: Cannot specify both APP and TEST"; \
+		exit 1; \
+	fi
+	@echo "Running $(if $(TEST),test $(TEST),application $(APP))..."
+	make compile
 	sed "s|<PROGRAM>|$(TARGET)|" $(GDB_TEMPLATE) > init.gdb
 	$(GDB) $(TARGET) -x init.gdb
 
 compile: $(TARGET)
 
-$(TARGET): $(KERNEL_OBJ) $(USER_OBJ) $(MEMMAP) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $(TARGET)  $(KERNEL_OBJ) $(USER_OBJ)
+$(TARGET): $(KERNEL_OBJ) $(PROGRAM_OBJ) $(MEMMAP) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $(TARGET) $(KERNEL_OBJ) $(PROGRAM_OBJ)
 
-$(KERNEL_OBJ): $(KERNEL_SRCS) $(KERNEL_INCS) | $(BUILD_DIR)
+$(KERNEL_OBJ): $(KERNEL_SRCS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -I $(KERNEL_DIR) -c -o $@ $(KERNEL_SRCS)
 
-$(USER_OBJ): $(USER_SRCS) $(USER_INCS) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -I $(USER_DIR) -c -o $@ $(USER_SRCS)
+$(PROGRAM_OBJ): $(PROGRAM_SRCS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -I $(PROGRAM_DIR) -c -o $@ $(PROGRAM_SRCS)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -60,14 +66,13 @@ check: $(TARGET)
 		-c "adapter speed 5000" -c "program $(TARGET) verify reset exit"
 
 docs:
-	@mkdir -p docs
+	@mkdir -p $(DOCS_DIR)
 	doxygen util/Doxyfile
 
 format:
 	find . -name "*.c" -o -name "*.h" | xargs clang-format -i
 
 clean:
-	rm -rf build/* docs/html/* docs/latex/* init.gdb
+	rm -rf $(BUILD_DIR)/* $(DOCS_DIR)/html/* $(DOCS_DIR)/latex/* init.gdb
 
-
-.PHONY: docs run compile console check clean format
+.PHONY: run compile console check docs format clean

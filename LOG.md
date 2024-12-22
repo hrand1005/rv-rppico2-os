@@ -422,8 +422,6 @@ data transfer line. It would make sense to revisit these settings if you have
 tasks that result in large data transfers to/from flash. Perhaps we can test
 alternate configurations against various benchmarks here later.
 
-
-
 ### .data Copy (11/29/24)
 
 We must initialize `.data` section from flash storage into RAM. This is fairly
@@ -865,7 +863,7 @@ blinky): `make run APP=blinky`
 Congrats, you've gone from hobbyist developer to professional software engineer.
 That's basically all there is to it.
 
-### Exception & Interrupt Handling
+### Exception & Interrupt Handling (12/16/24 - 12/21/24)
 
 We still haven't implemented "trap" handling, we only created a vector table
 with unimplemented interrupt and exception handlers. From `kernel/startup.S`:
@@ -1425,7 +1423,7 @@ with the "A" suffix, bits [15:0] represent the index of the 16-bit slice and
 you would write `0x00010000`. Let's say we wanted to enable external interrupt
 number 288. Then, in c: 
 
-```c
+```
 uint32_t lower = (288 / 16);                    // gives index
 uint32_t upper = 1 << (288 % 16);               // gives offset into slice
 *((uint32_t *)0xbe0) = (upper << 16) | lower;   // write 32 bit content to MEIEA
@@ -1451,7 +1449,7 @@ interrupt. These registers are `MEICONTEXT` and `MEINEXT`.
 `MEICONTEXT` appears to be useful for storing state in case we want to enable
 pre-emption during our system interrupt handling. It contains the information 
 on what the current context is (which IRQ is being serviced), plus which
-interrupt is being preempted, if any, which is useful WHY?
+interrupt is being preempted, if any.
 
 If we want to use it properly, and enable pre-emption, we'll  need to push it
 onto the stack just like our other caller-saved registers, so that it doesn't
@@ -1465,11 +1463,9 @@ returning, thus potentially letting us do interrupt tail calls and eliminating
 the need to repeatedly save and restore context.
 
 > **Question**: what is done for us by hardware upon receiving a machine external
-interrupt?
-**Answer**: See [3] 3.8.6.1.5 for how MEICONTEXT is automatically updated
-            See [3] 3.8.4 Interrupts and Exceptions trap entry sequence
-
-Like our exception table, we can define a similar 
+> interrupt?
+> **Answer**: See [3] 3.8.6.1.5 for how MEICONTEXT is automatically updated
+>             See [3] 3.8.4 Interrupts and Exceptions trap entry sequence
 
 The datasheet actually provides a minimal handler implementation without
 preemption in 3.8.6.1.6. We can use it as a basis for our first draft:
@@ -1690,7 +1686,7 @@ save_meicontext:
 get_next_irq:
     // reads next highest priority (IRQ << 2) from MEINEXT into a0 AND
     // sets MEINEXT.UPDATE to 1, updating MEICONTEXT with this context 
-    csrrsi a0, 0xbe4, 0x1
+    csrrsi a0, 0xbe4, 0x2
     // if MSB set then no more active IRQs for this context
     bltz a0, no_more_irqs
 dispatch_irq:
@@ -1785,13 +1781,160 @@ clear_mtip:
 
 Pretty straightforward stuff.
 
-### Refactor Crap (?)
+### Refactor Crap (12/22/24)
 
 As of today, there are a bunch of little tests in the startup source code that
 are making things a bit messy and unnecessarily annoying to navigate. There are
 also a lot of hard coded addresses in the assembly code that are difficult to
 read. Let's just fix that stuff and make a dedicated way to test our kernel
 code.
+
+Firstly, let's create a file for defining memory mapped addresses for the
+rp2350, `rp2350.h`. I'll add register addresses on an as-needed basis
+during development. While refactoring the contents of `startup.S`, I defined
+the following:
+
+```
+#define RVCSR_MEIEA         0xbe0
+#define RVCSR_MEIFA         0xbe2
+#define RVCSR_MEINEXT       0xbe4
+#define RVCSR_MEICONTEXT    0xbe5
+
+#define BOOTRAM_BASE        0x400e0000
+
+#define SIO_BASE            0xd0000000
+#define SIO_RISCV_SOFTIRQ   0xd00001a0
+#define SIO_MTIME_CTRL      0xd00001a4
+#define SIO_MTIME           0xd00001b0
+#define SIO_MTIMEH          0xd00001b4
+#define SIO_MTIMECMP        0xd00001b8
+#define SIO_MTIMECMPH       0xd00001bc
+```
+
+Then I included the header file in `startup.S` and replaced the immediates with
+these definitions.
+
+Now, to fix the testing. I currently have defined two kinds of tests. The first
+kind are sanity checks defined in `startup.S`, written in assembly. They are
+just labeled blocks of assembly code, and to execute the test requires only that
+an instruction to jump to them after initialization be un-commented. This is
+hacky, since the test code is being compiled into kernel, and running the tests
+requires modifying the source code.
+
+I also put a few tests in `user/` just so that I could run them from the
+command line with `make run APP=<test-name>`. But this is also confusing,
+because they don't actually execute in user mode.
+
+I'll refactor the project to meet the following conditions:
+
+1. Test code does not needlessly get compiled into the target binary.
+2. Tests can be run from the command line like so:
+```
+make run TEST=<test-name>
+```
+
+Let's also put our tests in a `test/` folder.
+In the makefile, we'll need to determine whether we're running an APP or a
+TEST. We should also print an error if for some reason both are defined.
+
+```
+APP ?= $(if $(TEST),,blinky)
+TARGET := $(if $(TEST),build/$(TEST).elf,build/$(APP).elf)
+```
+
+Instead of having `USER` variables, let's use generic `PROGRAM` variables to
+derive our directory, sources, and objects:
+
+```
+PROGRAM_DIR := $(if $(TEST),test/$(TEST),user/$(APP))
+PROGRAM_SRCS := $(wildcard $(PROGRAM_DIR)/*.c $(PROGRAM_DIR)/*.S)
+PROGRAM_OBJ := $(BUILD_DIR)/$(if $(TEST),test_$(TEST),user_$(APP)).o
+```
+
+Finally, let's make our `run` command a bit more helpful:
+
+```
+run: $(GDB_TEMPLATE)
+	@if [ -n "$(TEST)" ] && [ -n "$(APP)" ]; then \
+		echo "Error: Cannot specify both APP and TEST"; \
+		exit 1; \
+	fi
+	@echo "Running $(if $(TEST),test $(TEST),application $(APP))..."
+	make compile
+	sed "s|<PROGRAM>|$(TARGET)|" $(GDB_TEMPLATE) > init.gdb
+	$(GDB) $(TARGET) -x init.gdb
+```
+
+On the source code refactor side of things, we can move both our assembly 
+sanity checks and `user/` tests to `test/`. They should each get a nested
+directory that will be used for all their sources and includes. They will be
+linked and executed from their exposed `main` symbol, although we need not
+obey the calling convention when refactoring our assembly tests. For example,
+here is our new test for machine software interrupts, in
+`test/test_mti/main.S`:
+
+```
+/**
+ * @file main.S
+ * @brief Sanity check for mti handler implementation.
+ *
+ * Doesn't obey calling conventions.
+ *
+ * @author Herbie Rand
+ */
+
+#define SIO_RISCV_SOFTIRQ   0xd00001a0
+#define SIO_MTIME_CTRL      0xd00001a4
+#define SIO_MTIME           0xd00001b0
+#define SIO_MTIMEH          0xd00001b4
+#define SIO_MTIMECMP        0xd00001b8
+#define SIO_MTIMECMPH       0xd00001bc
+
+.section .text
+/**
+ * @brief Tests timer interrupts (cause 7).
+ *
+ * If this executes correctly, we should reach the breakpoint in the weak
+ * definition for `isr_mtimer_irq`.
+ */
+.global main
+main:
+    // enable mie.mtie
+    li a0, 0x80
+    csrs mie, a0
+
+    // set mtime lower and higher half to 0
+    li a0, SIO_MTIME
+    sw zero, 0(a0) // MTIME
+    sw zero, 4(a0) // MTIMEH
+    
+    // 1. write all ones to MTIMECMP
+    li a0, SIO_MTIMECMP
+    li a1, 0xffffffff // reset value
+    sw a1, (a0)
+
+    // 2. write value to MTIMECMPH
+    li a0, SIO_MTIMECMPH
+    sw zero, (a0)
+
+    // 3. write value to MTIMECMP
+    li a0, SIO_MTIMECMP
+    li a1, 1
+    sw a1, (a0)
+
+    // enable the timer with MTIME_CTRL, set fullspeed with bit 1
+    li a0, SIO_MTIME_CTRL
+    li a1, 0x3
+    sw a1, 0(a0)
+
+    fence.i
+    j _jail
+```
+
+I made a few other small changes, including changing `startup.S`'s definition
+of `jail` to a `.global _jail` that can be invoked from these tests.
+With these changes, it's now easy to run tests or programs by the name of their
+directory in either `user/` or `test/`.
 
 # References
 
