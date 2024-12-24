@@ -4,6 +4,19 @@ Logging the development of an operating system for the raspberry pi pico 2.
 The OS will be compiled for the RISC-V architecture (because I want to) and will
 thus run on the hazard3 cores in the rp2350 processor.
 
+I'm writing this RTOS because I'm interested in learning more about the
+following:
+
+- Bare-metal Programming
+- Operating Systems Design and Implementation
+- RISC-V Architecture & RISC-V ASM programming
+- Multicore Scheduling 
+- Interrupt Handling
+- Embedded Systems Security
+- Systems Performance Profiling and Optimization
+- Managing Projects with GNUMake
+- Testing Embedded Systems
+
 ## Getting Started (? - 11/26/24)
 
 I soldered header pins onto the board, got myself a debug probe, and poked around
@@ -1935,6 +1948,149 @@ I made a few other small changes, including changing `startup.S`'s definition
 of `jail` to a `.global _jail` that can be invoked from these tests.
 With these changes, it's now easy to run tests or programs by the name of their
 directory in either `user/` or `test/`.
+
+### User Mode (12/22/24 - ?)
+
+Until now, we've been executing all of our code in Machine mode, which outside
+of RISC-V parlance might be called "privileged" or "kernel" mode. When the
+system is in machine mode, we get access to special registers, instructions,
+and locations in memory. This is fine for our kernel code, but for applications
+we may not trust (possibly errant applications), we should execute them only
+with the required privileges and no more, so as to mitigate the risk of
+corrupting or crashing the system. 
+
+I've already been separating source files into `kernel/` and `user/` directories,
+so that it is clear which code is intended to execute in user mode. Let us now 
+turn to the RISC-V spec and privileged spec to learn how we may switch to user
+mode.
+
+
+> NOTE: we'll no longer be able to use the raspberry pi pico c sdk as a
+> reference, as it does not provide facilities to switch between privilege
+> modes!
+
+From 8.6.4 Trap Return:
+
+_"The MRET instruction is used to return from a trap taken into M-mode. MRET
+first determines what the new privilege mode will be according to the values of
+MPP and MPV in mstatus or mstatush, as encoded in Table 8.8. MRET then in
+mstatus/mstatush sets MPV=0, MPP=0, MIE=MPIE, and MPIE=1. Lastly, MRET sets the
+privilege mode as previously determined, and sets pc=mepc."_ [1]
+
+The trap return sequence in 3.8.4 of the rp2350 datasheet is a useful
+reference, and says this:
+
+_"Hand-manipulating the trap handling CSRs is useful for low-level OS
+operations such as context switching, or to make exception handlers return to
+the instruction after the trap point by incrementing MEPC before return. You
+can execute an mret without any prior trap, for example when entering U-mode
+code from M-mode for the first time."_ [3]
+
+So to transition to user mode, we should prepare the appropriate fields in
+`mstatus` and then execute `mret`.
+
+To set MPP to U-mode:
+
+```
+    li t0, 0xc00
+    csrc mstatus, t0
+```
+
+And to set `mepc` to the start of our user program (`main`):
+
+```
+    la t0, main
+    csrw mepc, t0
+```
+
+What about `MPIE`? According to the RISC-V privileged specification, higher
+level privileged modes' interrupts should always be enabled (regardless of the
+global interrupt enable bits in status registers) because otherwise there would
+be no way for the higher privilege level to regain control over the system.
+However, this subtlety was not implemented by Hazard3, as is explained in the
+errata in the rp2350 datasheet (RP2350 E7). Thus we must manually set mpie so
+that `mie` is set when we transition to U-mode with `mret`:
+
+```
+    li t0, 0x80
+    csrs mstatus, t0
+```
+
+Another thing we must consider is which stack(s) we should use. Unlike ARM,
+the RISC-V ISA doesn't offer much opinion on the handling of machine and user
+stacks. Nonetheless, I believe we should have separate stack spaces for machine
+and user mode so that down the line we may implement memory protection. Down
+the line we may have many separate tasks, each with their own machine and user
+stacks. For now, I'll define separate machine and user stacks in the linker
+script:
+
+```
+    __mstack0_size = 0x2000;
+    .mstack0 (NOLOAD) : ALIGN(4) {
+        __mstack0_limit = .;
+        . += __mstack0_size;
+        __mstack0_base = .;
+    } > RAM
+
+
+    __mstack1_size = 0x2000;
+    .mstack1 (NOLOAD) : ALIGN(4) {
+        __mstack1_limit = .;
+        . += __mstack1_size;
+        __mstack1_base = .;
+    } > RAM
+
+    __ustack0_size = 0x2000;
+    .ustack0 (NOLOAD) : ALIGN(4) {
+        __ustack0_limit = .;
+        . += __ustack0_size;
+        __ustack0_base = .;
+    } > RAM
+
+
+    __ustack1_size = 0x2000;
+    .ustack1 (NOLOAD) : ALIGN(4) {
+        __ustack1_limit = .;
+        . += __ustack1_size;
+        __ustack1_base = .;
+    } > RAM
+```
+
+Then we can set the new stack pointer before we execute `mret`: 
+
+```
+    la sp, __ustack0_base
+```
+
+This all appears to work fine, but I have already defined several tests that
+must execute in machine mode to force particular interrupts. And we may want to
+implement more machine mode tests in the future. So as to support these kinds
+of tests, we can use a c preprocessor directive to conditionally jump to main
+in machine mode if we're running a test. The test can then enter user mode if
+it so chooses. In `kernel/startup.S`:
+
+```
+#ifdef IS_TEST
+    jal main
+#else
+enter_user_mode:
+    // instructions leading up to mret...
+#endif
+```
+
+In our Makefile, we must provide the `IS_TEST` CFLAG, plus we must compile
+our kernel separately for tests and user applications (since the C source will
+be different). To address the first:
+
+```
+CFLAGS = $(ARCHFLAGS) -g -nostdlib -nodefaultlibs $(if $(TEST),-DIS_TEST,)
+```
+
+...and the second:
+
+```
+KERNEL_OBJ := $(BUILD_DIR)/kernel$(if $(TEST),_test,).o
+```
 
 # References
 

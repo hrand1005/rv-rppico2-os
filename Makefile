@@ -1,26 +1,28 @@
-APP ?= $(if $(TEST),,blinky)
-TARGET := $(if $(TEST),build/$(TEST).elf,build/$(APP).elf)
-
-MEMMAP := util/memmap.ld
-
 CC := riscv32-unknown-elf-gcc
 AS := riscv32-unknown-elf-as
 LD := riscv32-unknown-elf-ld
 GDB := riscv32-unknown-elf-gdb
 
+MEMMAP := util/memmap.ld
+
 ARCHFLAGS = -mabi=ilp32 -misa-spec=20191213 \
 		 -march=rv32ima_zicsr_zifencei_zba_zbb_zbkb_zbs_zca_zcb_zcmp
 
-CFLAGS = $(ARCHFLAGS) -g -nostdlib -nodefaultlibs
+CFLAGS = $(ARCHFLAGS) -g -nostdlib -nodefaultlibs $(if $(TEST),-DIS_TEST,)
 ASFLAGS = $(ARCHFLAGS) -g -mpriv-spec=1.12
 LDFLAGS = -T $(MEMMAP) -e _entry_point -Wl,--no-warn-rwx-segments
+
+APP ?= $(if $(TEST),,blinky)
+TARGET := $(if $(TEST),build/$(TEST).elf,build/$(APP).elf)
 
 BUILD_DIR := build
 DOCS_DIR := docs
 
 KERNEL_DIR := kernel
 KERNEL_SRCS := $(wildcard $(KERNEL_DIR)/*.c $(KERNEL_DIR)/*.S)
-KERNEL_OBJ := $(BUILD_DIR)/kernel.o
+
+# NOTE: compile separately for tests due to CPP directives 
+KERNEL_OBJ := $(BUILD_DIR)/kernel$(if $(TEST),_test,).o
 
 PROGRAM_DIR := $(if $(TEST),test/$(TEST),user/$(APP))
 PROGRAM_SRCS := $(wildcard $(PROGRAM_DIR)/*.c $(PROGRAM_DIR)/*.S)

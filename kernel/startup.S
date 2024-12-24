@@ -25,10 +25,10 @@ _reset_handler:
     csrr a0, mhartid
     bnez a0, _jail
 
-    // initialize the stack pointer
-    la sp, __stack0_base
+    // initialize the M-mode stack pointer for core 0
+    la sp, __mstack0_base
 
-    // for now, we'll use mscratch content to detect nested exceptions
+    // use mscratch to detect nested exception handling
     csrw mscratch, zero
 
     // mount the vector table
@@ -78,7 +78,6 @@ zero_bss_end:
 
     // clear all IRQ force array bits
     // 4 iters * 16 bits = 64 bits cleared.
-    // NOTE: MEIFA offset = 0xbe2
     li a0, 4
 clear_meip:
     csrw RVCSR_MEIFA, a0 
@@ -102,22 +101,48 @@ clear_mtip:
     sw zero, 4(a0) // SIO_MTIMEH
     
     // enable external interrupts
+    li a0, 0x800 
+    csrw mie, a0        // mie.meie
+    csrsi mstatus, 0x8  // mstatus.mie
 
-    // enable mie.meie
-    li a0, 0x800
-    csrw mie, a0
-
-    // enable mstatus.mie
-    csrsi mstatus, 0x8
-
+// tests decide for themselves whether they should enter U-mode
+#ifdef IS_TEST
     jal main
+#else
+enter_user_mode:
+    // NOTE: error check
+    la t0, __mstack0_base
+    bne sp, t0, _jail
 
-    // program ends
-    ebreak
+    // set mstatus MPP to U-mode
+    li t0, 0xc00
+    csrc mstatus, t0
+    
+    la ra, _jail
+    la sp, __ustack0_base
+    la t0, main
+    csrw mepc, t0
+    // TODO: put args in registers (if applicable)
 
+    // we set MPIE to 1 so that when in U-mode
+    // machine interrupts are enabled. this shouldn't
+    // strictly be necessary according to the RISC-V
+    // spec, but the Hazard3 implementation handles this
+    // incorrectly, from rp2350 datasheet see RP2350 E-7
+    li t0, 0x80
+    csrs mstatus, t0
+
+    // jumps to the user program `main` in U-mode
+    // should not return here, rather upon returning
+    // should go to `ra`, which has been set to jail
+    mret
+#endif
+
+/**
+ * @brief Loop and breakpoint repeatedly.
+ */
 .global _jail
 _jail:
-    // loop and breakpoint indefinitely
     ebreak
     j _jail
 
@@ -362,7 +387,6 @@ dispatch_irq:
     j get_next_irq
 
 no_more_irqs:
-
     // restore meicontext, mstatus, mepc
     lw a2, 72(sp)
     lw a1, 68(sp)

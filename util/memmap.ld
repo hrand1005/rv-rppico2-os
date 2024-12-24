@@ -13,11 +13,14 @@
  *  __rodata_end
  *  __bss_start
  *  __bss_end
- *  __stack0_limit
- *  __stack0_base
- *  __stack1_limit
- *  __stack1_base
- *
+ *  __mstack0_limit
+ *  __mstack0_base
+ *  __mstack1_limit
+ *  __mstack1_base
+ *  __ustack0_limit
+ *  __ustack0_base
+ *  __ustack1_limit
+ *  __ustack1_base
  */
 
 MEMORY
@@ -70,20 +73,37 @@ SECTIONS
     __gp = ALIGN((__bss_start + __bss_end) / 2, 4);
 
     /* core 0 */
-    __stack0_size = 0x2000;
-    .stack0 (NOLOAD) : ALIGN(4) {
-        __stack0_limit = .;
-        . += __stack0_size;
-        __stack0_base = .;
+    __mstack0_size = 0x2000;
+    .mstack0 (NOLOAD) : ALIGN(4) {
+        __mstack0_limit = .;
+        . += __mstack0_size;
+        __mstack0_base = .;
     } > RAM
 
 
     /* core 1 */
-    __stack1_size = 0x2000;
-    .stack1 (NOLOAD) : ALIGN(4) {
-        __stack1_limit = .;
-        . += __stack1_size;
-        __stack1_base = .;
+    __mstack1_size = 0x2000;
+    .mstack1 (NOLOAD) : ALIGN(4) {
+        __mstack1_limit = .;
+        . += __mstack1_size;
+        __mstack1_base = .;
+    } > RAM
+
+    /* core 0 */
+    __ustack0_size = 0x2000;
+    .ustack0 (NOLOAD) : ALIGN(4) {
+        __ustack0_limit = .;
+        . += __ustack0_size;
+        __ustack0_base = .;
+    } > RAM
+
+
+    /* core 1 */
+    __ustack1_size = 0x2000;
+    .ustack1 (NOLOAD) : ALIGN(4) {
+        __ustack1_limit = .;
+        . += __ustack1_size;
+        __ustack1_base = .;
     } > RAM
 
 }
