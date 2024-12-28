@@ -5,13 +5,6 @@ GDB := riscv32-unknown-elf-gdb
 
 MEMMAP := util/memmap.ld
 
-ARCHFLAGS = -mabi=ilp32 -misa-spec=20191213 \
-		 -march=rv32ima_zicsr_zifencei_zba_zbb_zbkb_zbs_zca_zcb_zcmp
-
-CFLAGS = $(ARCHFLAGS) -g -nostdlib -nodefaultlibs $(if $(TEST),-DIS_TEST,)
-ASFLAGS = $(ARCHFLAGS) -g -mpriv-spec=1.12
-LDFLAGS = -T $(MEMMAP) -e _entry_point -Wl,--no-warn-rwx-segments
-
 APP ?= $(if $(TEST),,blinky)
 TARGET := $(if $(TEST),build/$(TEST).elf,build/$(APP).elf)
 
@@ -20,7 +13,6 @@ DOCS_DIR := docs
 
 KERNEL_DIR := kernel
 KERNEL_SRCS := $(wildcard $(KERNEL_DIR)/*.c $(KERNEL_DIR)/*.S)
-
 # NOTE: compile separately for tests due to CPP directives 
 KERNEL_OBJ := $(BUILD_DIR)/kernel$(if $(TEST),_test,).o
 
@@ -29,6 +21,15 @@ PROGRAM_SRCS := $(wildcard $(PROGRAM_DIR)/*.c $(PROGRAM_DIR)/*.S)
 PROGRAM_OBJ := $(BUILD_DIR)/$(if $(TEST),test_$(TEST),user_$(APP)).o
 
 GDB_TEMPLATE := util/gdb_template
+
+ARCHFLAGS = -mabi=ilp32 -misa-spec=20191213 \
+		 -march=rv32ima_zicsr_zifencei_zba_zbb_zbkb_zbs_zca_zcb_zcmp
+
+# tests get IS_TEST flag and kernel libraries
+CFLAGS = $(ARCHFLAGS) -g -nostdlib -nodefaultlibs -I common \
+		 $(if $(TEST),-DIS_TEST -I $(KERNEL_DIR),)
+ASFLAGS = $(ARCHFLAGS) -g -mpriv-spec=1.12
+LDFLAGS = -T $(MEMMAP) -e _entry_point -Wl,--no-warn-rwx-segments
 
 .DEFAULT_GOAL := run
 
@@ -48,7 +49,8 @@ $(TARGET): $(KERNEL_OBJ) $(PROGRAM_OBJ) $(MEMMAP) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $(TARGET) $(KERNEL_OBJ) $(PROGRAM_OBJ)
 
 $(KERNEL_OBJ): $(KERNEL_SRCS) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -I $(KERNEL_DIR) -c -o $@ $(KERNEL_SRCS)
+	# TODO: is '-r' what we want here?
+	$(CC) $(CFLAGS) -I $(KERNEL_DIR) -r -o $@ $(KERNEL_SRCS)
 
 $(PROGRAM_OBJ): $(PROGRAM_SRCS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -I $(PROGRAM_DIR) -c -o $@ $(PROGRAM_SRCS)

@@ -14,3 +14,4 @@ to understand what this is about.
 - During runtime initialization, if necessary, enable timer interrupts with `mie.mtie`
 - profile and possibly implement last-chance check of IRQ before exiting `isr_mei`
 - eliminate jump in mei interrupt handler?
+- Compile all kernel modules independently, link in as required

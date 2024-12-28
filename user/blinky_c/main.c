@@ -4,6 +4,8 @@
  *        potentially informative comments.
  * @author Herbie Rand
  */
+#include "riscv.h"
+
 #define SIO_FUNCSEL (0x5)
 #define LED_MASK    (1 << 25)
 

@@ -1949,7 +1949,7 @@ of `jail` to a `.global _jail` that can be invoked from these tests.
 With these changes, it's now easy to run tests or programs by the name of their
 directory in either `user/` or `test/`.
 
-### User Mode (12/22/24 - ?)
+### User Mode (12/22/24 - 12/23/24)
 
 Until now, we've been executing all of our code in Machine mode, which outside
 of RISC-V parlance might be called "privileged" or "kernel" mode. When the
@@ -2091,6 +2091,67 @@ CFLAGS = $(ARCHFLAGS) -g -nostdlib -nodefaultlibs $(if $(TEST),-DIS_TEST,)
 ```
 KERNEL_OBJ := $(BUILD_DIR)/kernel$(if $(TEST),_test,).o
 ```
+
+### Interrupt Driven Blinky (12/23/24 - ?)
+
+Let's now use our interrupt handling implementations, plus user mode, to 
+rewrite our blinky program. I'll do this for several purposes:
+
+1. To gain familiarity with the RISC-V platform timer (`mtime`).
+2. To test our interrupt handling implementation.
+3. To ensure that our user mode code plays nice with the switches to machine
+mode during interrupt handling.
+4. To build out a way for our user level code to invoke system calls.
+5. To build out timing facilities/libraries that we can use in the future.
+6. To build out a gpio module that we can use and build on in the future.
+
+Let's start by creating a simple GPIO library. Then, let's create a system
+call to turn on and off the on-board LED.
+
+From section _section_, we can see that the clock can be configured to use
+multiple sources. 
+
+From the RISC-V spec, we can learn how to use `mtime` to produce interrupts.
+
+...
+
+Running the program, we can discern the clock source and frequency.
+
+`CLK_SYS_CTRL` Register:
+
+```
+(gdb) p/x *(unsigned long *)0x4001003c 
+$1 = 0x0
+```
+
+This indicates that `CLK_REF` is being used. We can check the selected ref source with the `CLK_REF_CTRL` register.
+```
+(gdb) p/x *(unsigned long *)0x40010038
+$3 = 0x1
+```
+
+This "one-hot" encoding indicates source 0x0 in the `CLK_REF_CTRL` register,
+corroborated by reading that register directly:
+```
+(gdb) p/x *(unsigned long *)0x40010030
+$4 = 0x0
+```
+
+In the datasheet, this indicates that the ROSC_CLKSRC_PH is being used for the
+reference clock, and to my understanding the clock driving the `mtime` counter.
+
+From 8.1.1.2, it appears that the Ring Oscillator (ROSC) runs nominally at 11
+MHz, but may vary quite a bit due to temperature and environment. When we need
+greater precision and consistency, we should consider other clocks to drive our
+counter. However, for rewriting blinky, it is suitable. 
+
+### Core 1 Initialization (12/23/24 - ?)
+
+At first, we just sent core 1 to jail if it started up before being awoken.
+In practice, this _shouldn't_ happen, and in fact core 0 should need to
+initiate the startup sequence by sending core 1 a message via the appropriate
+message queue.
+
 
 # References
 
