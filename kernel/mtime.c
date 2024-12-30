@@ -5,6 +5,8 @@
 /** @brief ROSC nominal frequency is 11 MHz */
 #define ROSC_NOMINAL_MHZ 11
 
+static mtime_cache_t cache;
+
 void mtimer_enable() {
     asm volatile("li a0, 0x80\n\t"
                  "csrs mie, a0\n\t"
@@ -19,13 +21,21 @@ int mtimer_start(uint32_t us) {
     uint32_t hi = 0;
     uint32_t coef = ROSC_NOMINAL_MHZ;
 
-    // safe 32-bit * 32-bit multiplication
-    // note that exceeding 64 bits is impossible
-    while (coef--) {
-        if (lo + us < lo) {
-            hi++;
+    if (us == cache.us) {
+        lo = cache.mtimecmp;
+        hi = cache.mtimecmph;
+    } else {
+        // safe 32-bit * 32-bit multiplication
+        // note that exceeding 64 bits is impossible
+        while (coef--) {
+            if (lo + us < lo) {
+                hi++;
+            }
+            lo += us;
         }
-        lo += us;
+        cache.us = us;
+        cache.mtimecmp = lo;
+        cache.mtimecmph = hi;
     }
 
     *(uint32_t *)SIO_MTIME_CTRL = 0;

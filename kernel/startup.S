@@ -72,7 +72,7 @@ copy_data_end:
 zero_bss:
     beq a0, a1, zero_bss_end
     sw zero, (a0)
-    addi a0, a0, 1
+    addi a0, a0, 4
     j zero_bss
 zero_bss_end:
 

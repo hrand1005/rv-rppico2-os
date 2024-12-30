@@ -53,21 +53,21 @@ SECTIONS
         __data_start = .;
         *(.data*)
         *(.sdata*)
-        __data_end = .;
+        __data_end = ALIGN(4);
     } > RAM AT > FLASH
     __data_load_start = LOADADDR(.data);
 
     .rodata : ALIGN(4) {
         __rodata_start = .;
         *(.rodata*)
-        __rodata_end = .;
+        __rodata_end = ALIGN(4);
     } > FLASH
 
     .bss (NOLOAD) : ALIGN(4) {
         __bss_start = .;
         *(.bss*)
         *(.sbss*)
-        __bss_end = .;
+        __bss_end = ALIGN(4);
     } > RAM
 
     __gp = ALIGN((__bss_start + __bss_end) / 2, 4);

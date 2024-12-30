@@ -5,6 +5,21 @@
 #include "types.h"
 
 /**
+ * @brief Cache structure to prevent re-computing mtimecmph.
+ *
+ * May be helpful in case mtimecmph computations are expensive,
+ * and/or the mtime counter is frequently reset.
+ */
+typedef struct {
+    /** @brief Milliseconds (cache key) */
+    uint32_t us;
+    /** @brief Cached mtimecmp value */
+    uint32_t mtimecmp;
+    /** @brief Cached mtimecmph value */
+    uint32_t mtimecmph;
+} mtime_cache_t;
+
+/**
  * @brief Enables the mtime timer interrupt.
  * You can implement the interrupt handler by overriding
  * the weak definition for `void isr_mtimer_irq()`.

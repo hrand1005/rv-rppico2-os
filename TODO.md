@@ -15,3 +15,4 @@ to understand what this is about.
 - profile and possibly implement last-chance check of IRQ before exiting `isr_mei`
 - eliminate jump in mei interrupt handler?
 - Compile all kernel modules independently, link in as required
+- mtimer cache -- how much time did we save?

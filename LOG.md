@@ -2145,6 +2145,202 @@ MHz, but may vary quite a bit due to temperature and environment. When we need
 greater precision and consistency, we should consider other clocks to drive our
 counter. However, for rewriting blinky, it is suitable. 
 
+With this, we can write a simple driver to enable and start the system timer using
+`mtime` and `mtimecmp`, as well as `mtimecmph`. We must take special care to avoid
+overflow when determining the top counter value, and to make use of the upper 32
+bits for the countertop in `mtimecmph`. Here is a simple implementation of `mtime.c`:
+
+```
+#include "mtime.h"
+#include "rp2350.h"
+#include "types.h"
+
+/** @brief ROSC nominal frequency is 11 MHz */
+#define ROSC_NOMINAL_MHZ 11
+
+void mtimer_enable() {
+    asm volatile("li a0, 0x80\n\t"
+                 "csrs mie, a0\n\t"
+                 :
+                 :
+                 : "a0");
+}
+
+// NOTE: assumes ROSC
+int mtimer_start(uint32_t us) {
+    uint32_t lo = 0;
+    uint32_t hi = 0;
+    uint32_t coef = ROSC_NOMINAL_MHZ;
+
+    // safe 32-bit * 32-bit multiplication
+    // note that exceeding 64 bits is impossible
+    while (coef--) {
+        if (lo + us < lo) {
+            hi++;
+        }
+        lo += us;
+    }
+
+    *(uint32_t *)SIO_MTIME_CTRL = 0;
+    *(uint32_t *)SIO_MTIME = 0;
+    *(uint32_t *)SIO_MTIMEH = 0;
+    *(uint32_t *)SIO_MTIMECMP = (uint32_t)-1;
+    *(uint32_t *)SIO_MTIMECMPH = hi;
+    *(uint32_t *)SIO_MTIMECMP = lo;
+    *(uint32_t *)SIO_MTIME_CTRL = 3;
+    return 0;
+}
+```
+
+Since we'll likely reset the system timer to its previous value, it seems natural
+to avoid re-computing `mtimecmp` and `mtimecmph`. Let's implement a simple
+size-1 cache for this case. Here is `mtime.h`:
+
+
+```
+#ifndef MTIME_H
+#define MTIME_H
+
+#include "rp2350.h"
+#include "types.h"
+
+/**
+ * @brief Cache structure to prevent re-computing mtimecmph.
+ *
+ * May be helpful in case mtimecmph computations are expensive,
+ * and/or the mtime counter is frequently reset.
+ */
+typedef struct {
+    /** @brief Milliseconds (cache key) */
+    uint32_t us;
+    /** @brief Cached mtimecmp value */
+    uint32_t mtimecmp;
+    /** @brief Cached mtimecmph value */
+    uint32_t mtimecmph;
+} mtime_cache_t;
+
+/**
+ * @brief Enables the mtime timer interrupt.
+ * You can implement the interrupt handler by overriding
+ * the weak definition for `void isr_mtimer_irq()`.
+ */
+void mtimer_enable();
+
+/**
+ * @brief Starts the RISC-V mtime timer, interrupting at the provided duration.
+ * @param us    Integer microseconds indicating duration before interrupt.
+ * @return 0 on success, nonzero on error
+ */
+int mtimer_start(uint32_t us);
+
+/**
+ * @brief Stops the mtime timer from ticking.
+ */
+
+#endif
+```
+
+...and here is `mtime.c`:
+
+```
+#include "mtime.h"
+#include "rp2350.h"
+#include "types.h"
+
+/** @brief ROSC nominal frequency is 11 MHz */
+#define ROSC_NOMINAL_MHZ 11
+
+static mtime_cache_t cache;
+
+void mtimer_enable() {
+    asm volatile("li a0, 0x80\n\t"
+                 "csrs mie, a0\n\t"
+                 :
+                 :
+                 : "a0");
+}
+
+// NOTE: assumes ROSC
+int mtimer_start(uint32_t us) {
+    uint32_t lo = 0;
+    uint32_t hi = 0;
+    uint32_t coef = ROSC_NOMINAL_MHZ;
+
+    if (us == cache.us) {
+        lo = cache.mtimecmp;
+        hi = cache.mtimecmph;
+    } else {
+        // safe 32-bit * 32-bit multiplication
+        // note that exceeding 64 bits is impossible
+        while (coef--) {
+            if (lo + us < lo) {
+                hi++;
+            }
+            lo += us;
+        }
+        cache.us = us;
+        cache.mtimecmp = lo;
+        cache.mtimecmph = hi;
+    }
+
+    *(uint32_t *)SIO_MTIME_CTRL = 0;
+    *(uint32_t *)SIO_MTIME = 0;
+    *(uint32_t *)SIO_MTIMEH = 0;
+    *(uint32_t *)SIO_MTIMECMP = (uint32_t)-1;
+    *(uint32_t *)SIO_MTIMECMPH = hi;
+    *(uint32_t *)SIO_MTIMECMP = lo;
+    *(uint32_t *)SIO_MTIME_CTRL = 3;
+    return 0;
+}
+```
+
+And to test our implementation, `test/test_led/main.c`:
+
+```
+/**
+ * @brief Tests blinky with mtimer interrupt.
+ *
+ * The actual rate of blinking depends on the clock source and environment.
+ * However, assuming that the clock uses the default ROSC at nominal clock
+ * rate of 11 MHz, `mtimer_start` will behave correctly, and the led will
+ * blink on for 0.5 seconds, off for 0.5 seconds, repeatedly.
+ *
+ * @author Herbie Rand
+ */
+#include "gpio.h"
+#include "mtime.h"
+#include "riscv.h"
+#include "types.h"
+
+#define LED_PIN 25
+
+static uint8_t on = 0;
+static uint32_t us = 500000;
+
+int main() {
+    mtimer_enable();
+    gpio_init(LED_PIN);
+    if (mtimer_start(us)) {
+        asm volatile("ebreak");
+    }
+    while (1) {
+        asm volatile("wfi");
+    }
+    return 0;
+}
+
+void isr_mtimer_irq() {
+    if (!on) {
+        gpio_set(LED_PIN);
+    } else {
+        gpio_clr(LED_PIN);
+    }
+    on = ~on;
+    mtimer_start(us);
+}
+```
+
+
 ### Core 1 Initialization (12/23/24 - ?)
 
 At first, we just sent core 1 to jail if it started up before being awoken.
