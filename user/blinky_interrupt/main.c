@@ -1,11 +1,14 @@
-void isr_mtimer_irq();
+#include "riscv.h"
+#include "types.h"
 
 int main() {
-    // start timer (set to 0.5 seconds)
-    // loop indefinitely (wfi)
+    asm volatile("ebreak");
+
+    // let's see what this does
+    asm volatile("ecall");
+    return 0;
 }
 
 void isr_mtimer_irq() {
-    // switch led
-    // start timer (0.5 seconds)
+    breakpoint();
 }

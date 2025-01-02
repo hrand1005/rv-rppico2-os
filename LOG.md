@@ -2340,6 +2340,66 @@ void isr_mtimer_irq() {
 }
 ```
 
+It's great that we now have interrupt-driven blinky, but it's not yet working as
+a user application. Generally speaking, we need a way for our user applications
+to safely and securely request the kernel perform operations (e.g. operations on
+privileged segments, CSRs) on the application's behalf, aka we need to
+implement system calls. We don't have things like memory protection yet, but
+we'll probably want that stuff in the future.
+
+### ... CUT to 1/01/2025
+
+Ok, so it turns out I am an idiot -- user mode was not properly being entered 
+nor executed. Firstly, this is the actual correct way to set `MPP` to enter
+user mode (`kernel/startup.S`:
+
+```
+    // set mstatus MPP to U-mode
+    li t0, 0x1800
+    csrc mstatus, t0
+```
+
+The next problem we have is that the user mode, by default, does not have
+permissions to execute its own text region. So we should modify the linker
+script to separate the kernel and application text regions, and update the
+system privileges at boot time to let the user text region be executed. 
+
+First, separating out machine mode and user mode text regions (similar to 
+how we separated the user and machine stacks):
+
+```
+        __text_start = .;
+        __mtext_start = .;
+        kernel*.o(.text*)
+        . = ALIGN(4);
+        __mtext_end = .;
+        __utext_start = .;
+        user*.o(.text*)
+        . = ALIGN(4);
+        __utext_end = .;
+        __text_end = .;
+```
+
+I'd like to eventually make this a bit more robust so that any arbitrary
+binary's text section can be inserted here instead of relying on file names.
+We'll do that when we improve the Makefile again to individually compile kernel and user modules.
+
+While doing this, I also split up (and created symbols for) machine and user
+mode data, rodata, and bss segments.
+
+Now, let us apply the correct permissions to our user text segment.
+
+...stuff...
+
+I've been making various changes as I learn and implement this stuff. I've made
+further changes to the linker script, and have noticed that there are notable
+hardware bugs which will also constrain our implementation:
+
+1. RP2350-E3
+2. RP2350-E6
+
+But (1) gives us a great excuse to start implementing system calls.
+
 
 ### Core 1 Initialization (12/23/24 - ?)
 

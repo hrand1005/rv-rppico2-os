@@ -115,7 +115,7 @@ enter_user_mode:
     bne sp, t0, _jail
 
     // set mstatus MPP to U-mode
-    li t0, 0xc00
+    li t0, 0x1800
     csrc mstatus, t0
     
     la ra, _jail
@@ -132,9 +132,23 @@ enter_user_mode:
     li t0, 0x80
     csrs mstatus, t0
 
+    // set user text execute permissions
+    la t0, __utext_start
+    srli t0, t0, 2
+    li t1, 0xfff
+    or t0, t0, t1
+    csrw RVCSR_PMPADDR0, t0
+
+    // NOTE: Per RP2350-E6, R-W-X is the order to PMPCFG
+    // set address mode to NAPOT and X perms
+    csrwi RVCSR_PMPCFG0, 0x19
+
     // jumps to the user program `main` in U-mode
     // should not return here, rather upon returning
     // should go to `ra`, which has been set to jail
+
+    // NOTE: main should be at a location executable
+    // in user mode
     mret
 #endif
 
