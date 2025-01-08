@@ -18,3 +18,4 @@ to understand what this is about.
 - mtimer cache -- how much time did we save?
 - Compile modules individually, make linker template instead of wildcard matching?
 - Rewrite now invalid user mode applications, move some to tests
+- Make PMP configuration helpers so that it isn't a huge pain in the ass and unreadable

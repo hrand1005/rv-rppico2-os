@@ -70,21 +70,18 @@ SECTIONS
         __image_def_end = .;
 
         /* assume text segments <= 4 KB each */
-        /* . = ALIGN(4096); */
-        . = ALIGN(4);
+        . = ALIGN(4096);
         __text_start = .;
         __mtext_start = .;
         build/kernel*.o(.text)
-        . = ALIGN(4);
-        /* . = ALIGN(4096); */
+        . = ALIGN(4096);
         __mtext_end = .;
         __utext_start = .;
         build/user*.o(.text)
-        . = ALIGN(4);
-        /* . = ALIGN(4096); */
+        . = ALIGN(4096);
         __utext_end = .;
         __text_end = .;
-    }
+    } > FLASH
 
     .data : ALIGN(4) {
         __data_start = .;
@@ -127,6 +124,7 @@ SECTIONS
         . = ALIGN(4);
         __mbss_end = .;
         __ubss_start = .;
+        __gp = .;
         build/user*.o(.bss*)
         build/user*.o(.sbss*)
         . = ALIGN(4);
@@ -134,20 +132,17 @@ SECTIONS
         __bss_end = .;
     } > RAM
 
-    __gp = ALIGN((__bss_start + __bss_end) / 2, 4);
-
     /* core 0 */
     __mstack0_size = 0x2000;
-    .mstack0 (NOLOAD) : ALIGN(4) {
+    .mstack0 (NOLOAD) : ALIGN(4096) {
         __mstack0_limit = .;
         . += __mstack0_size;
         __mstack0_base = .;
     } > RAM
 
-
     /* core 1 */
     __mstack1_size = 0x2000;
-    .mstack1 (NOLOAD) : ALIGN(4) {
+    .mstack1 (NOLOAD) : ALIGN(4096) {
         __mstack1_limit = .;
         . += __mstack1_size;
         __mstack1_base = .;
@@ -155,7 +150,7 @@ SECTIONS
 
     /* core 0 */
     __ustack0_size = 0x2000;
-    .ustack0 (NOLOAD) : ALIGN(4) {
+    .ustack0 (NOLOAD) : ALIGN(4096) {
         __ustack0_limit = .;
         . += __ustack0_size;
         __ustack0_base = .;
@@ -164,7 +159,7 @@ SECTIONS
 
     /* core 1 */
     __ustack1_size = 0x2000;
-    .ustack1 (NOLOAD) : ALIGN(4) {
+    .ustack1 (NOLOAD) : ALIGN(4096) {
         __ustack1_limit = .;
         . += __ustack1_size;
         __ustack1_base = .;

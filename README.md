@@ -33,6 +33,7 @@ make run APP=blinky
 
 ## Project Layout
 
-- `kernel`  - 
-- `user`    - user applications and libraries
+- `kernel`  - privileged operating system code
+- `user`    - user libraries
 - `include` - definitions common to both kernel and user code 
+- `apps`    - user application implementations. One is compiled with the RTOS at a time.

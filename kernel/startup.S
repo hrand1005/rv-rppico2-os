@@ -135,13 +135,23 @@ enter_user_mode:
     // set user text execute permissions
     la t0, __utext_start
     srli t0, t0, 2
-    li t1, 0xfff
+    li t1, 0x3ff // 4 KB, equal to user text size
     or t0, t0, t1
     csrw RVCSR_PMPADDR0, t0
 
+    // set user stack read/write permissions
+    la t0, __ustack0_limit
+    srli t0, t0, 2
+    li t1, 0x3ff // 4 KB, equal to user stack sizes
+    or t0, t0, t1
+    csrw RVCSR_PMPADDR1, t0
+
     // NOTE: Per RP2350-E6, R-W-X is the order to PMPCFG
     // set address mode to NAPOT and X perms
-    csrwi RVCSR_PMPCFG0, 0x19
+    // CFG 0 --> 0001 1001 --> 0x19 --> NAPOT, X  perms, NOTE E6
+    // CFG 1 --> 0001 1110 --> 0x1E --> NAPOT, RW perms, NOTE E6
+    li t0, 0x1e19
+    csrw RVCSR_PMPCFG0, t0
 
     // jumps to the user program `main` in U-mode
     // should not return here, rather upon returning
@@ -202,6 +212,8 @@ isr_exc:
     // nested an exception, and should go to jail.
     csrrw ra, mscratch, ra
     bnez ra, _jail
+
+    // save frame pointer
     addi sp, sp, -60
     // save the remaining caller-saved registers before dispatch
     sw a0, 0(sp)
@@ -221,6 +233,8 @@ isr_exc:
     sw t6, 56(sp)
     
     // dispatch to correct exception handler
+    // provide pointer to stack frame
+    mv a0, sp
     csrr t0, mcause
     li t1, 11
     bltu t1, t0, isr_unhandled_exc

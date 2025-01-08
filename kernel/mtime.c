@@ -1,18 +1,18 @@
 #include "mtime.h"
+#include "asm.h"
 #include "rp2350.h"
 #include "types.h"
 
 /** @brief ROSC nominal frequency is 11 MHz */
 #define ROSC_NOMINAL_MHZ 11
 
+/** @brief timer enable bits for mie csr */
+#define MTIE_MASK 0x80
+
 static mtime_cache_t cache;
 
 void mtimer_enable() {
-    asm volatile("li a0, 0x80\n\t"
-                 "csrs mie, a0\n\t"
-                 :
-                 :
-                 : "a0");
+    set_mie(MTIE_MASK);
 }
 
 // NOTE: assumes ROSC
@@ -52,10 +52,10 @@ int _clksys_src() {
     uint32_t sys_select = *(uint32_t *)CLOCKS_CLK_SYS_SELECTED;
     switch (sys_select) {
     case 1: // CLK_REF
-        asm volatile("ebreak");
+        breakpoint();
         break;
     case 2: // CLKSRC_CLK_SYS_AUX
-        asm volatile("ebreak");
+        breakpoint();
         break;
     }
     return 0;
@@ -65,16 +65,16 @@ int _clkref_src() {
     uint32_t ref_select = *(uint32_t *)CLOCKS_CLK_REF_SELECTED;
     switch (ref_select) {
     case 1: // ROSC_CLKSRC_PH
-        asm volatile("ebreak");
+        breakpoint();
         break;
     case 2: // CLKSRC_CLK_REF_AUX
-        asm volatile("ebreak");
+        breakpoint();
         break;
     case 3: // XOSC_CLKSRC
-        asm volatile("ebreak");
+        breakpoint();
         break;
     case 4: // LPOSC_CLKSRC
-        asm volatile("ebreak");
+        breakpoint();
         break;
     }
     return 0;

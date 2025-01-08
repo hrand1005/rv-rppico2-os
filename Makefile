@@ -58,8 +58,8 @@ $(KERNEL_OBJ): $(KERNEL_SRCS) | $(BUILD_DIR)
 	# TODO: is '-r' what we want here?
 	$(CC) $(CFLAGS) -I $(KERNEL_DIR) -r -o $@ $(KERNEL_SRCS)
 
-$(PROGRAM_OBJ): $(PROGRAM_SRCS) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -I $(PROGRAM_DIR) -c -o $@ $(PROGRAM_SRCS) $(USER_SRCS)
+$(PROGRAM_OBJ): $(PROGRAM_SRCS) $(USER_SRCS) | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -I $(PROGRAM_DIR) -I $(USER_DIR) -r -o $@ $(PROGRAM_SRCS) $(USER_SRCS)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)

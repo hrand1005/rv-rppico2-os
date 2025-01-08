@@ -2437,7 +2437,222 @@ With the knowledge that these were just pushed and the current stack pointer,
 we can set arguments in our user-code as normal and recover them in our U-mode
 `ecall` handler. Let's implement a system call to turn on the on-board LED. 
 
+### ...CUT -- see commit fa54edf7ecbb17d671a6148b40601d2bbf12bade (01/07/2024)
 
+Ok, so after making some fixes related to testing, the linker script, Makefile,
+and project structure, I now have separate `user/` and `apps/` directories.
+`user/` will contain user libraries including system call stubs, whereas `apps/`
+will contain instances of programs, where a single app is built into the RTOS,
+and it may use any `user/` library code. `include/` contains definitions
+accessible to all code, including kernel code. With that, let's create a blinky
+application that uses a system call to set the LED at GPIO pin 25.
+
+In `user/`, we'll define the libraries that will wrap system calls.
+In `user/led.h`:
+
+```
+#ifndef LED_H
+#define LED_H
+
+/**
+ * @brief Turns on the on-board LED.
+ */
+void led_on();
+
+/**
+ * @brief Turns off the on-board LED.
+ */
+void led_off();
+
+#endif
+```
+
+Let's distinguish the system calls using macros in `include/sys.h`, accessible 
+to both the user code and the kernel:
+
+```
+#ifndef SYS_H
+#define SYS_H
+
+#define SYS_LED_ON  0
+#define SYS_LED_OFF 1
+
+#endif
+```
+
+Now let's invoke the system call with `ecall` in `user/usys.S`:
+```
+#include led.h
+#include sys.h
+
+.global led_on
+led_on:
+    li a7, SYS_LED_ON
+    ecall
+    ret
+
+.global led_off
+led_off:
+    li a7, SYS_LED_OFF
+    ecall
+    ret
+```
+
+By convention, we'll use `a7` to store the number for the system call. We do
+this because it enables us to define prototypes with more args (0-6), and we
+won't need to modify the other argument registers so long as we reserve `a7`
+for passing the system call number.
+
+Now, let's implement system call dispatching in the kernel. Let's start by
+overriding the weak definition of `isr_env_umode_exc` in a new files
+`kernel/syscall.h` and `kernel/syscall.c`, and creating system calls for
+turning the LED on and off.
+
+`kernel/syscall.h`:
+```
+/**
+ * @brief Contains syscall prototypes.
+ */
+#ifndef SYSCALL_H
+#define SYSCALL_H
+
+#include "types.h"
+
+/** @brief Exception frame, pushed onto the stack during ecall */
+typedef struct {
+    uint32_t a0;
+    uint32_t a1;
+    uint32_t a2;
+    uint32_t a3;
+    uint32_t a4;
+    uint32_t a5;
+    uint32_t a6;
+    uint32_t a7;
+    uint32_t t0;
+    uint32_t t1;
+    uint32_t t2;
+    uint32_t t3;
+    uint32_t t4;
+    uint32_t t5;
+    uint32_t t6;
+} exception_frame_t;
+
+/**
+ * @brief Overrides weak umode ecall service routine.
+ * @param exception_frame_t containing syscall args
+ */
+void isr_env_umode_exc(exception_frame_t *);
+
+/**
+ * @brief Uses GPIO to turn on the LED.
+ * @param exception_frame_t containing syscall args
+ */
+void sys_led_on(exception_frame_t *);
+
+/**
+ * @brief Uses GPIO to turn off the LED.
+ * @param exception_frame_t containing syscall args
+ */
+void sys_led_off(exception_frame_t *);
+
+#endif
+```
+
+`kernel/syscall.c`:
+
+```
+#include "asm.h"
+#include "gpio.h"
+#include "rp2350.h"
+#include "sys.h"
+#include "syscall.h"
+#include "types.h"
+
+#define LED_PIN 25
+
+static uint8_t led_init = 0;
+
+static void (*syscall_table[])(exception_frame_t *) = {
+    [SYS_LED_ON] sys_led_on,
+    [SYS_LED_OFF] sys_led_off,
+};
+
+void isr_env_umode_exc(exception_frame_t *sf) {
+    if (sf->a7 >= SYSCALL_COUNT) {
+        // should never reach here
+        breakpoint();
+    }
+    syscall_table[sf->a7](sf);
+    inc_mepc();
+}
+
+void sys_led_on(exception_frame_t *sf) {
+    (void)sf;
+    if (!led_init) {
+        gpio_init(LED_PIN);
+        led_init = 1;
+    }
+    gpio_set(LED_PIN);
+}
+
+void sys_led_off(exception_frame_t *sf) {
+    (void)sf;
+    gpio_clr(LED_PIN);
+}
+```
+
+As you may have noticed, I've also defined some helpers in `asm.h` and `asm.c`.
+See the source for details.
+
+Now, let's implement the blinky app, this time as a proper user mode
+application that invokes system calls. `apps/blinky/main.c`:
+
+```
+#include "led.h"
+#include "time.h"
+
+int main() {
+    while (1) {
+        led_on();
+        for (int i = 0; i < 5000000; i++);
+        led_off();
+        for (int i = 0; i < 5000000; i++);
+    }
+
+    return 0;
+}
+```
+
+One more thing you need to do is make sure that user code can read/write to the
+user stack, plus fetch and execute user code. After defining some linker
+symbols, I accomplished this in `kernel/startup.S`, paying special attention
+to the rp2350 documentation and taking note of the errata about incorrect RWX
+bit order in the PMP configuration registers [3]:
+
+```
+    // set user text execute permissions
+    la t0, __utext_start
+    srli t0, t0, 2
+    li t1, 0x3ff // 4 KB, equal to user text size
+    or t0, t0, t1
+    csrw RVCSR_PMPADDR0, t0
+
+    // set user stack read/write permissions
+    la t0, __ustack0_limit
+    srli t0, t0, 2
+    li t1, 0x3ff // 4 KB, equal to user stack sizes
+    or t0, t0, t1
+    csrw RVCSR_PMPADDR1, t0
+
+    // NOTE: Per RP2350-E6, R-W-X is the order to PMPCFG
+    // set address mode to NAPOT and X perms
+    // CFG 0 --> 0001 1001 --> 0x19 --> NAPOT, X  perms, NOTE E6
+    // CFG 1 --> 0001 1110 --> 0x1E --> NAPOT, RW perms, NOTE E6
+    li t0, 0x1e19
+    csrw RVCSR_PMPCFG0, t0
+```
+
+The result is a working blinky app.
 
 ### Core 1 Initialization (12/23/24 - ?)
 

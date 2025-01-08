@@ -17,6 +17,7 @@
 #define RVCSR_PMPCFG1    0x3a1
 #define RVCSR_PMPCFG2    0x3a2
 #define RVCSR_PMPADDR0   0x3b0
+#define RVCSR_PMPADDR1   0x3b1
 
 #define CLOCKS_BASE             0x40010000
 #define CLOCKS_CLK_REF_CTRL     0x40010030
