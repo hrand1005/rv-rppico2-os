@@ -17,3 +17,4 @@ to understand what this is about.
 - Compile all kernel modules independently, link in as required
 - mtimer cache -- how much time did we save?
 - Compile modules individually, make linker template instead of wildcard matching?
+- Rewrite now invalid user mode applications, move some to tests

@@ -10,13 +10,19 @@ TARGET := $(if $(TEST),build/$(TEST).elf,build/$(APP).elf)
 
 BUILD_DIR := build
 DOCS_DIR := docs
+# NOTE: only for definitions common to kernel and user code
+INCLUDE_DIR := include
 
 KERNEL_DIR := kernel
 KERNEL_SRCS := $(wildcard $(KERNEL_DIR)/*.c $(KERNEL_DIR)/*.S)
 # NOTE: compile separately for tests due to CPP directives 
 KERNEL_OBJ := $(BUILD_DIR)/kernel$(if $(TEST),_test,).o
 
-PROGRAM_DIR := $(if $(TEST),test/$(TEST),user/$(APP))
+USER_DIR := user
+USER_SRCS := $(wildcard $(USER_DIR)/*.c $(USER_DIR)/*.S)
+
+# NOTE: The compiled program may be a test or an application
+PROGRAM_DIR := $(if $(TEST),test/$(TEST),apps/$(APP))
 PROGRAM_SRCS := $(wildcard $(PROGRAM_DIR)/*.c $(PROGRAM_DIR)/*.S)
 PROGRAM_OBJ := $(BUILD_DIR)/$(if $(TEST),test_$(TEST),user_$(APP)).o
 
@@ -26,7 +32,7 @@ ARCHFLAGS = -mabi=ilp32 -misa-spec=20191213 \
 		 -march=rv32ima_zicsr_zifencei_zba_zbb_zbkb_zbs_zca_zcb_zcmp
 
 # tests get IS_TEST flag and kernel libraries
-CFLAGS = $(ARCHFLAGS) -g -nostdlib -nodefaultlibs -I common \
+CFLAGS = $(ARCHFLAGS) -g -nostdlib -nodefaultlibs -I $(INCLUDE_DIR) \
 		 $(if $(TEST),-DIS_TEST -I $(KERNEL_DIR),)
 ASFLAGS = $(ARCHFLAGS) -g -mpriv-spec=1.12
 LDFLAGS = -T $(MEMMAP) -e _entry_point -Wl,--no-warn-rwx-segments
@@ -53,7 +59,7 @@ $(KERNEL_OBJ): $(KERNEL_SRCS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -I $(KERNEL_DIR) -r -o $@ $(KERNEL_SRCS)
 
 $(PROGRAM_OBJ): $(PROGRAM_SRCS) | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -I $(PROGRAM_DIR) -c -o $@ $(PROGRAM_SRCS)
+	$(CC) $(CFLAGS) -I $(PROGRAM_DIR) -c -o $@ $(PROGRAM_SRCS) $(USER_SRCS)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)

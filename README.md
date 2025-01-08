@@ -30,3 +30,9 @@ blinky):
 ```
 make run APP=blinky
 ```
+
+## Project Layout
+
+- `kernel`  - 
+- `user`    - user applications and libraries
+- `include` - definitions common to both kernel and user code 

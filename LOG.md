@@ -2398,7 +2398,45 @@ hardware bugs which will also constrain our implementation:
 1. RP2350-E3
 2. RP2350-E6
 
-But (1) gives us a great excuse to start implementing system calls.
+But (1) gives us a great excuse to start implementing system calls. From the
+description:
+
+_"This means that granting Non-secure access to the PADS registers in the QFN-60
+package does not allow Non-secure software to control the correct pads. It may
+also allow Non-secure control of pads that are not granted in GPIO_NSMASK0."_
+
+And the suggested workaround:
+
+_"Disable Non-secure access to the PADS registers by clearing PADS_BANK0.NSP,
+NSU. Implement a Secure Gateway (Arm) or ecall handler (RISC-V) to permit
+Non-secure/U-mode code to read/write its assigned PADS_BANK0 registers."_
+
+Essentially, our `ecall` handler will be our system call dispatcher. User mode
+code will execute an environment call, which will trap us into machine mode,
+where the kernel service will be invoked.
+
+If we add an `ecall` to the beginning of our blinky program, we will see that
+we enter `isr_env_umode_exc`, as expected. And printing `mcause` gives `0x8`,
+indicating that the cause of the exception is a U-mode environment call, as
+expected. Since we'll want to implement multiple system calls, we need to find
+a way to distinguish the kind of service requested. There isn't too much detail
+about how to pass parameters in the datasheet or RISC-V spec, but the
+unprivileged spec says this:
+
+_"The ECALL instruction is used to make a service request to the execution
+environment. The EEI will define how parameters for the service request are
+passed, but usually these will be in defined locations in the integer register
+file."_ [2]
+
+This gives us some flexibility. We must decide for ourselves how kernel services
+will be requested and how to pass arguments.
+
+At the time that `isr_env_umode_exc` is invoked, we know that our generic
+exception handling code will have pushed caller saved registers to the stack.
+With the knowledge that these were just pushed and the current stack pointer,
+we can set arguments in our user-code as normal and recover them in our U-mode
+`ecall` handler. Let's implement a system call to turn on the on-board LED. 
+
 
 
 ### Core 1 Initialization (12/23/24 - ?)

@@ -91,6 +91,8 @@ SECTIONS
         __mdata_start = .;
         build/kernel*.o(.data*)
         build/kernel*.o(.sdata*)
+        build/test*.o(.data*)
+        build/test*.o(.sdata*)
         . = ALIGN(4);
         __mdata_end = .;
         __udata_start = .;
@@ -99,7 +101,7 @@ SECTIONS
         . = ALIGN(4);
         __udata_end = .;
         __data_end = .;
-    }
+    } > RAM AT > FLASH
     __data_load_start = LOADADDR(.data);
 
     .rodata : ALIGN(4) {
@@ -120,6 +122,8 @@ SECTIONS
         __mbss_start = .;
         build/kernel*.o(.bss*)
         build/kernel*.o(.sbss*)
+        build/test*.o(.bss*)
+        build/test*.o(.sbss*)
         . = ALIGN(4);
         __mbss_end = .;
         __ubss_start = .;

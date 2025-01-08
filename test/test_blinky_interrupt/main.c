@@ -16,7 +16,7 @@
 #define LED_PIN 25
 
 static uint8_t on = 0;
-static uint32_t us = 500000;
+static uint32_t us = 5000000;
 
 int main() {
     mtimer_enable();
