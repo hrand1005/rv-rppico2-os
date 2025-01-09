@@ -2654,6 +2654,73 @@ bit order in the PMP configuration registers [3]:
 
 The result is a working blinky app.
 
+### Return of the Makefile (01/08/2024)
+
+I've come to learn that rewriting the Makefile is going to be a routine part of
+development. Although, hopefully we're getting to a pretty stable state. I want
+to make two improvements:
+
+1. Compile all modules (objects) individually.
+2. Use a linker script template so we can specify the exact binaries used
+   before link time.
+
+Let's start by compiling all objects individually. Instead of compiling all
+sources into `kernel.o`, `user.o`, etc, let's create build subdirectories for
+each kind of binary before linking. The build directory will mirror our project
+structure, so something like this:
+
+```
+build/kernel/
+build/user/
+build/apps/...
+build/test/...
+```
+
+To compile modules individually, let's redefine our Makefile variables to
+determine our sources and objects. For example, for our user libraries:
+
+```
+USER_DIR := user
+USER_C_SRCS := $(wildcard $(USER_DIR)/*.c)
+USER_ASM_SRCS := $(wildcard $(USER_DIR)/*.S)
+USER_BUILD_DIR := $(BUILD_DIR)/$(USER_DIR)
+USER_OBJS := $(USER_C_SRCS:$(USER_DIR)/%.c=$(USER_BUILD_DIR)/%.o) \
+			 $(USER_ASM_SRCS:$(USER_DIR)/%.S=$(USER_BUILD_DIR)/%.o) 
+```
+
+And the corresponding rules will compile each object:
+
+```
+$(USER_BUILD_DIR)/%.o: $(USER_DIR)/%.S
+	@mkdir -p $(USER_BUILD_DIR)
+	$(CC) $(CFLAGS) -I $(USER_DIR) -c $< -o $@
+
+$(USER_BUILD_DIR)/%.o: $(USER_DIR)/%.c
+	@mkdir -p $(USER_BUILD_DIR)
+	$(CC) $(CFLAGS) -I $(USER_DIR) -c $< -o $@
+```
+
+Likewise for compiling kernel and program files.
+On the linker script side of things, I defined a linker script template instead,
+which uses sed to substitute some patterns before creating the linker script
+used to create our final elf executable. In our linker template, there are
+lines like this:
+
+```
+<KERNEL_BUILD_DIR>/*.o(.text)
+```
+
+Then, in the rule where we create our elf file, before the linking step:
+```
+	@sed -e "s|<KERNEL_BUILD_DIR>|$(KERNEL_BUILD_DIR)|g" \
+		 -e "s|<USER_BUILD_DIR>|$(USER_BUILD_DIR)|g" \
+		 -e "s|<PROGRAM_BUILD_DIR>|$(PROGRAM_BUILD_DIR)|g" \
+		$(MEMMAP_TEMPLATE) > $(MEMMAP)
+```
+
+This should make it possible for us to add, remove, and rename source files as
+needed with minimal modifications to the linker script.
+
 ### Core 1 Initialization (12/23/24 - ?)
 
 At first, we just sent core 1 to jail if it started up before being awoken.

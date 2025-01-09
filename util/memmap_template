@@ -36,15 +36,6 @@
  *  __ustack0_base
  *  __ustack1_limit
  *  __ustack1_base
- *
- * TODO:
- *      Use a template version of this linker script to insert the appropriate
- *      binaries for machine and user memory segments, instead of relying on
- *      the following kinds of lines:
- * 
- *      build/kernel*.o(.<section>)
- *      build/user*.o(.<section>)
- *
  */
 
 MEMORY
@@ -73,11 +64,16 @@ SECTIONS
         . = ALIGN(4096);
         __text_start = .;
         __mtext_start = .;
-        build/kernel*.o(.text)
+
+        <KERNEL_BUILD_DIR>/*.o(.text)
+
         . = ALIGN(4096);
         __mtext_end = .;
         __utext_start = .;
-        build/user*.o(.text)
+
+        <USER_BUILD_DIR>/*.o(.text)
+        <PROGRAM_BUILD_DIR>/*.o(.text)
+
         . = ALIGN(4096);
         __utext_end = .;
         __text_end = .;
@@ -86,15 +82,19 @@ SECTIONS
     .data : ALIGN(4) {
         __data_start = .;
         __mdata_start = .;
-        build/kernel*.o(.data*)
-        build/kernel*.o(.sdata*)
-        build/test*.o(.data*)
-        build/test*.o(.sdata*)
+
+        <KERNEL_BUILD_DIR>/*.o(.data*)
+        <KERNEL_BUILD_DIR>/*.o(.sdata*)
+
         . = ALIGN(4);
         __mdata_end = .;
         __udata_start = .;
-        build/user*.o(.data*)
-        build/user*.o(.sdata*)
+
+        <USER_BUILD_DIR>/*.o(.data*)
+        <USER_BUILD_DIR>/*.o(.sdata*)
+        <PROGRAM_BUILD_DIR>/*.o(.data)
+        <PROGRAM_BUILD_DIR>/*.o(.sdata)
+
         . = ALIGN(4);
         __udata_end = .;
         __data_end = .;
@@ -104,11 +104,16 @@ SECTIONS
     .rodata : ALIGN(4) {
         __rodata_start = .;
         __mrodata_start = .;
-        build/kernel*.o(.rodata*)
+
+        <KERNEL_BUILD_DIR>/*.o(.rodata*)
+
         . = ALIGN(4);
         __mrodata_end = .;
         __urodata_start = .;
-        build/user*.o(.rodata*)
+
+        <USER_BUILD_DIR>/*.o(.rodata*)
+        <PROGRAM_BUILD_DIR>/*.o(.rodata)
+
         . = ALIGN(4);
         __urodata_end = .;
         __rodata_end = .;
@@ -117,16 +122,20 @@ SECTIONS
     .bss (NOLOAD) : ALIGN(4) {
         __bss_start = .;
         __mbss_start = .;
-        build/kernel*.o(.bss*)
-        build/kernel*.o(.sbss*)
-        build/test*.o(.bss*)
-        build/test*.o(.sbss*)
+
+        <KERNEL_BUILD_DIR>/*.o(.bss*)
+        <KERNEL_BUILD_DIR>/*.o(.sbss*)
+
         . = ALIGN(4);
         __mbss_end = .;
         __ubss_start = .;
         __gp = .;
-        build/user*.o(.bss*)
-        build/user*.o(.sbss*)
+
+        <USER_BUILD_DIR>/*.o(.bss*)
+        <USER_BUILD_DIR>/*.o(.sbss*)
+        <PROGRAM_BUILD_DIR>/*.o(.bss)
+        <PROGRAM_BUILD_DIR>/*.o(.sbss)
+
         . = ALIGN(4);
         __ubss_end = .;
         __bss_end = .;
