@@ -1,8 +1,5 @@
 # TODOs
 
-There are a lot of decisions that I've made without any practical justification.
-Here are some things I'd like to try:
-
 - Moving .text or at least .vectors out of XIP Flash to SRAM, compare performance
 - Alternately, pin vector table and associated handlers' cache lines
 - `src/rp2_common/hardware_exception/exception_table_riscv.S` suggests special
@@ -19,3 +16,4 @@ to understand what this is about.
 - Compile modules individually, make linker template instead of wildcard matching?
 - Rewrite now invalid user mode applications, move some to tests
 - Make PMP configuration helpers so that it isn't a huge pain in the ass and unreadable
+- Read Debug Mode documentation; update DPC programatically to continue

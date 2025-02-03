@@ -2719,15 +2719,78 @@ Then, in the rule where we create our elf file, before the linking step:
 ```
 
 This should make it possible for us to add, remove, and rename source files as
-needed with minimal modifications to the linker script.
+needed with minimal modifications to the linker script. Full details in the
+commit with hash 4751f09cb8e93a5b465a71244c50bda35d2204a7.
 
 ### Core 1 Initialization (12/23/24 - ?)
 
-At first, we just sent core 1 to jail if it started up before being awoken.
-In practice, this _shouldn't_ happen, and in fact core 0 should need to
-initiate the startup sequence by sending core 1 a message via the appropriate
-message queue.
+So far we've just been sending core 1 to jail if it executes on startup.
+However, we want to be able to use our second core. To understand how we can
+make use of core 1, I attempt to answer my own questions:
 
+1. What is the core 1 startup sequence?
+2. What configuration is shared between cores?
+3. How do interrupts work?
+4. How do the cores communicate with one another?
+5. What should core 1 do after booting?
+
+---
+
+#### 1. What is the core 1 startup sequence? 
+
+The core 1 startup sequence is in the datasheet [3]. We can write a helper for
+this sequence.
+
+#### 2. What configuration is shared between cores?
+
+The cores share memory (the address space) and most registers. Found exceptions:
+
+- ALL CSRS!!!
+- PERI_NONSEC   (SIO_BASE + 0x190)
+- NMI_MASK0     (EPPB_BASE + 0x0)
+- NMI_MASK1     (EPPB_BASE + 0x4)
+- SLEEPCTRL     (EPPB_BASE + 0x8) <-- ?
+
+#### 3. How do interrupts work?
+
+Some interrupts are core local:
+
+- SIO_IRQ_FIFO
+- SIO_IRQ_FIFO_NS
+- SIO_IRQ_MTIMECMP
+- IO_IRQ_BANK0
+- IRQ_IO_BANK0_NS
+- IO_IRQ_QSPI
+- IO_IRQ_QSPI_NS
+
+All other interrupts should be mirrored on both cores. Section 3.2 of the
+datasheet says this:
+
+_"Non core-local interrupts should only be enabled in the interrupt controller
+of a single core at a time, and will be serviced by the core whose interrupt
+controller they are enabled in."_ [3]
+
+#### 4. How do the cores communicate with one another?
+
+Resources for inter-core communication include hardware spinlocks,
+inter-processor FIFOs, and doorbells.
+
+#### 5. What should core 1 do after booting?
+
+It depends. Core 1 may be manually configured to only execute certain tasks.
+However, I'd like to initialize a more general runtime that does symmetric
+multiprocessing.
+
+---
+
+### Core 1 Initialization Continued (02/02/2025 - ?)
+
+Let's start by getting some simple task to execute on core 1. Core 0 will
+initialize core 1 and then spin indefinitely. Core 1 will execute blinky.
+
+We'll implement this as a test with machine mode privileges. Then, after
+seeing what core 1 initialization looks like, we can add basic configuration
+to our kernel. 
 
 # References
 

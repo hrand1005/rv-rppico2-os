@@ -179,6 +179,7 @@ _jail:
  */
 .p2align 6
 .section .vectors, "ax"
+.global __vector_table
 __vector_table:
 
 // disable compressed instructions
