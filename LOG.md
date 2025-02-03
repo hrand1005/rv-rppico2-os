@@ -2722,7 +2722,7 @@ This should make it possible for us to add, remove, and rename source files as
 needed with minimal modifications to the linker script. Full details in the
 commit with hash 4751f09cb8e93a5b465a71244c50bda35d2204a7.
 
-### Core 1 Initialization (12/23/24 - ?)
+### Core 1 Initialization (12/23/24 - 02/03/2025)
 
 So far we've just been sending core 1 to jail if it executes on startup.
 However, we want to be able to use our second core. To understand how we can
@@ -2783,7 +2783,7 @@ multiprocessing.
 
 ---
 
-### Core 1 Initialization Continued (02/02/2025 - ?)
+### Core 1 Initialization Continued (02/02/2025 - 02/03/2025)
 
 Let's start by getting some simple task to execute on core 1. Core 0 will
 initialize core 1 and then spin indefinitely. Core 1 will execute blinky.
@@ -2791,6 +2791,302 @@ initialize core 1 and then spin indefinitely. Core 1 will execute blinky.
 We'll implement this as a test with machine mode privileges. Then, after
 seeing what core 1 initialization looks like, we can add basic configuration
 to our kernel. 
+
+The rp2350 datasheet provides a not-so-pseudo code sequence for initializing
+core 1, which by default just loops in bootrom: 
+
+```c
+// values to be sent in order over the FIFO from core 0 to core 1
+//
+// vector_table is value for VTOR register
+// sp is initial stack pointer (SP)
+// entry is the initial program counter (PC) (don't forget to set the thumb bit!)
+const uint32_t cmd_sequence[] =
+{0, 0, 1, (uintptr_t) vector_table, (uintptr_t) sp, (uintptr_t) entry};
+
+uint seq = 0;
+
+do {
+    uint cmd = cmd_sequence[seq];
+    // always drain the READ FIFO (from core 1) before sending a 0
+    if (!cmd) {
+        // discard data from read FIFO until empty
+        multicore_fifo_drain();
+        // execute a SEV as core 1 may be waiting for FIFO space
+        __sev();
+    }
+    // write 32 bit value to write FIFO
+    multicore_fifo_push_blocking(cmd);
+    // read 32 bit value from read FIFO once available
+    uint32_t response = multicore_fifo_pop_blocking();
+    // move to next state on correct response (echo-d value) otherwise start over
+    seq = cmd == response ? seq + 1 : 0;
+} while (seq < count_of(cmd_sequence));
+```
+
+As you can see, core 1 is initialized with a pointer to the vector table, a stack
+pointer, and an entry point. These are sent in a defined sequence over the
+interprocessor FIFO queues.
+
+We can use this as a starting point for our test. Let us define the following
+functions (in order of appearance):
+
+```c
+void multicore_fifo_drain();
+void __sev();
+void multicore_fifo_push_blocking(uint32_t);
+uint32_t multicore_fifo_pop_blocking();
+```
+
+We can gather from context that `multicore_fifo_drain()` should read all contents
+from the FIFO, thus emptying the queue. It makes sense that the routine is 
+`multicore` because the code is core independent, (references to the FIFO
+registers are core-local). We can check the least significant bit in `FIFO_ST`
+to determine if the FIFO is empty, and we can read a value by loading from the
+`FIFO_RD` address:
+
+```c
+#define SIO_FIFO_ST       0xd0000050
+#define SIO_FIFO_RD       0xd0000058
+
+void multicore_fifo_drain() {
+    uint32_t rd;
+    // read until RX is empty
+    while (*(uint32_t *)SIO_FIFO_ST & 0x1) {
+        rd = *(uint32_t *)SIO_FIFO_RD;
+    }
+    (void)rd;
+}
+```
+
+`__sev()` notifies the opposite core that an event has occurred. In arm, there
+is a sev instruction, but for RISC-V and our interrupt controller, there is a
+special instruction provided by our hazard3 extension to accomplish the same
+thing, and the datasheet suggests a macro. Here is the resulting code:
+
+```c
+#define __h3_unblock() asm("slt x0, x0, x1")
+
+void __sev() {
+    __h3_unblock();
+}
+```
+
+Next we must write the command to the interprocessor FIFO. We should check that
+there is space in the FIFO before writing, and then notify the core via a `__sev()`:
+
+```c
+#define SIO_FIFO_WR       0xd0000054
+
+void multicore_fifo_push_blocking(uint32_t cmd) {
+    while (!(*(uint32_t *)SIO_FIFO_ST & 0x2))
+        ;
+    *(uint32_t *)SIO_FIFO_WR = cmd;
+    __sev();
+}
+```
+
+`multicore_fifo_pop_blocking` should simply wait until a message is available
+in the FIFO, then return it:
+
+```c
+uint32_t multicore_fifo_pop_blocking() {
+    while (!(*(uint32_t *)SIO_FIFO_ST & 0x1))
+        ;
+    return *(uint32_t *)SIO_FIFO_RD;
+}
+```
+
+With this, we can put everything together in a function `init_core1()`. Let's
+have the function accept arguments to the vector table, stack pointer, and
+function pointer where it will begin executing.
+
+```c
+void init_core1(uint32_t, uint32_t, uint32_t);
+
+void init_core1(uint32_t vt, uint32_t sp, uint32_t fn) {
+    uint32_t cmd;
+    uint32_t resp;
+    uint32_t cmd_sequence[6];
+
+    cmd_sequence[0] = 0;
+    cmd_sequence[1] = 0;
+    cmd_sequence[2] = 1;
+    cmd_sequence[3] = vt;
+    cmd_sequence[4] = sp;
+    cmd_sequence[5] = fn;
+
+    uint32_t seq = 0;
+    do {
+        cmd = cmd_sequence[seq];
+        if (!cmd) {
+            multicore_fifo_drain();
+            __sev();
+        }
+        multicore_fifo_push_blocking(cmd);
+        resp = multicore_fifo_pop_blocking();
+        seq = (cmd == resp) ? (seq + 1) : 0;
+    } while (seq < 6);
+}
+```
+
+This is sufficient to begin executing code on core 1. However, to actually use
+core 1 for our interrupt driven blinky program, we need to repeat some of the
+initial configuration that core 0 gets in `kernel/startup.S`. Now seems to be a
+good time to build up some helpers for modifying CSRs in c code. I won't go over
+them here, but they are defined in `kernel/asm.h` and `kernel/asm.S`. 
+
+To use the timer interrupts, we must enable interrupts globally in `mstatus` on
+core 1. Recall that all RISC-V CSRs are core-local. It also seems to be a good idea
+to clear pending interrupts in MEIFA. Finally, I modified the `mtimer_enable`
+code to clear pending timer interrupts (assuming they are leftover for some
+previous use of the timer, no longer needed).
+
+After putting everything together, here is the resulting test
+(`test/test_blinky_core1/main.c`):
+
+```c
+/**
+ * @brief Tests core 1 initialization by running blinky with mtimer interrupt
+ *        on core 1.
+ *
+ * Expected behavior is blinking LED, identical to test_blinky_interrupt.
+ * However, core 0 should spin indefinitely, and core 1 should be executing
+ * the mtimer interrupt handler.
+ *
+ * @author Herbie Rand
+ */
+#include "gpio.h"
+#include "mtime.h"
+#include "riscv.h"
+#include "types.h"
+#include "asm.h"
+#include "rp2350.h"
+
+#define LED_PIN 25
+
+void init_core1(uint32_t, uint32_t, uint32_t);
+void multicore_fifo_drain();
+void __sev();
+void multicore_fifo_push_blocking(uint32_t);
+uint32_t multicore_fifo_pop_blocking();
+
+void blinky();
+void isr_mtimer_irq();
+
+extern uint32_t __vector_table;
+extern uint32_t __mstack1_base;
+
+uint32_t *vt = &__vector_table;
+uint32_t *sp1 = &__mstack1_base;
+
+static uint8_t on = 0;
+static uint32_t us = 5000000;
+
+int main() {
+    init_core1((uint32_t)vt + 1, (uint32_t)sp1, (uint32_t)blinky);
+    while (1) {
+        asm volatile("wfi");
+    }
+    return 0;
+}
+
+void init_core1(uint32_t vt, uint32_t sp, uint32_t fn) {
+    uint32_t cmd;
+    uint32_t resp;
+    uint32_t cmd_sequence[6];
+
+    cmd_sequence[0] = 0;
+    cmd_sequence[1] = 0;
+    cmd_sequence[2] = 1;
+    cmd_sequence[3] = vt;
+    cmd_sequence[4] = sp;
+    cmd_sequence[5] = fn;
+
+    uint32_t seq = 0;
+    do {
+        cmd = cmd_sequence[seq];
+        if (!cmd) {
+            multicore_fifo_drain();
+            __sev();
+        }
+        multicore_fifo_push_blocking(cmd);
+        resp = multicore_fifo_pop_blocking();
+        seq = (cmd == resp) ? (seq + 1) : 0;
+    } while (seq < 6);
+}
+
+void multicore_fifo_drain() {
+    uint32_t rd;
+    // read until RX is empty
+    while (*(uint32_t *)SIO_FIFO_ST & 0x1) {
+        rd = *(uint32_t *)SIO_FIFO_RD;
+    }
+    (void)rd;
+}
+
+void __sev() {
+    __h3_unblock();
+}
+
+void multicore_fifo_push_blocking(uint32_t cmd) {
+    while (!(*(uint32_t *)SIO_FIFO_ST & 0x2))
+        ;
+    *(uint32_t *)SIO_FIFO_WR = cmd;
+    __sev();
+}
+
+uint32_t multicore_fifo_pop_blocking() {
+    while (!(*(uint32_t *)SIO_FIFO_ST & 0x1))
+        ;
+    return *(uint32_t *)SIO_FIFO_RD;
+}
+
+void blinky() {
+    // enable external interrupts on core 1
+    set_mstatus(MIE_MASK);
+    clr_meifa();
+    mtimer_enable();
+    gpio_init(LED_PIN);
+
+    if (mtimer_start(us)) {
+        asm volatile("ebreak");
+    }
+    while (1) {
+        asm volatile("wfi");
+    }
+}
+
+void isr_mtimer_irq() {
+    if (!on) {
+        gpio_set(LED_PIN);
+    } else {
+        gpio_clr(LED_PIN);
+    }
+    on = ~on;
+    mtimer_start(us);
+}
+```
+
+Note that it's important that core 0 does NOT have the timer interrupt enabled.
+We want only core 1 controlling the LED in this test.
+
+### Core 1 Initialization Refactored (02/03/2025)
+
+Now that we understand how to initialize core 1, let's add some helpers to our
+kernel so that we may initialize core 1 when desired.
+
+`kernel/runtime.h`:
+
+```c
+
+```
+
+`kernel/runtime.c`:
+
+```c
+
+```
 
 # References
 

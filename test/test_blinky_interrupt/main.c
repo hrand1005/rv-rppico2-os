@@ -10,7 +10,6 @@
  */
 #include "gpio.h"
 #include "mtime.h"
-#include "riscv.h"
 #include "types.h"
 
 #define LED_PIN 25

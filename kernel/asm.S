@@ -34,6 +34,11 @@ clr_mip:
     csrc mip, a0
     ret
 
+.global clr_mstatus
+clr_mstatus:
+    csrc mstatus, a0
+    ret
+
 .global clr_meifa
 clr_meifa:
     // clear all IRQ force array bits
@@ -45,7 +50,7 @@ __meifa_loop:
     bgtz a0, __meifa_loop
     ret
 
-.global clr_mstatus
-clr_mstatus:
-    csrc mstatus, a0
+.global sev
+sev:
+    slt x0, x0, x1 // hazard3.unblock 
     ret

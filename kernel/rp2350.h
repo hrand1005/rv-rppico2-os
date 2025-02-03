@@ -8,6 +8,10 @@
 #ifndef RP2350_H
 #define RP2350_H
 
+// Flags for MSTATUS
+#define MIE_MASK 0x8
+
+// Flags for MIE and MIP
 #define MSI_MASK 0x8
 #define MTI_MASK 0x80
 #define MEI_MASK 0x800
@@ -44,6 +48,9 @@
 #define SIO_GPIO_OUT_CLR  0xd0000020
 #define SIO_GPIO_OE_SET   0xd0000038
 #define SIO_GPIO_OE_CLR   0xd0000040
+#define SIO_FIFO_ST       0xd0000050
+#define SIO_FIFO_WR       0xd0000054
+#define SIO_FIFO_RD       0xd0000058
 #define SIO_RISCV_SOFTIRQ 0xd00001a0
 #define SIO_MTIME_CTRL    0xd00001a4
 #define SIO_MTIME         0xd00001b0
@@ -51,14 +58,12 @@
 #define SIO_MTIMECMP      0xd00001b8
 #define SIO_MTIMECMPH     0xd00001bc
 
-#define SIO_FIFO_ST 0xd0000050
-#define SIO_FIFO_WR 0xd0000054
-#define SIO_FIFO_RD 0xd0000058
-
 #define ACCESSCTRL_BASE        0x40060000
 #define ACCESSCTRL_GPIO_NMASK0 0x4006000c
 #define ACCESSCTRL_GPIO_NMASK1 0x40060010
 #define ACCESSCTRL_IO_BANK0    0x40060068
 #define ACCESSCTRL_PADS_BANK0  0x40060070
+
+#define __h3_unblock() asm("slt x0, x0, x1")
 
 #endif

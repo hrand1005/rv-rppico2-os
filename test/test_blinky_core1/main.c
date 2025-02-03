@@ -1,17 +1,21 @@
+/**
+ * @brief Tests core 1 initialization by running blinky with mtimer interrupt
+ *        on core 1.
+ *
+ * Expected behavior is blinking LED, identical to test_blinky_interrupt.
+ * However, core 0 should spin indefinitely, and core 1 should be executing
+ * the mtimer interrupt handler.
+ *
+ * @author Herbie Rand
+ */
+#include "asm.h"
 #include "gpio.h"
 #include "mtime.h"
-#include "riscv.h"
+#include "rp2350.h"
+#include "runtime.h"
 #include "types.h"
 
-#include "asm.h"
-
 #define LED_PIN 25
-
-void init_core1();
-void multicore_fifo_drain();
-void __sev();
-void multicore_fifo_push_blocking(uint32_t);
-uint32_t multicore_fifo_pop_blocking();
 
 void blinky();
 void isr_mtimer_irq();
@@ -24,78 +28,18 @@ uint32_t *sp1 = &__mstack1_base;
 
 static uint8_t on = 0;
 static uint32_t us = 5000000;
-static uint32_t cmd_sequence[6];
 
 int main() {
-    cmd_sequence[0] = 0;
-    cmd_sequence[1] = 0;
-    cmd_sequence[2] = 1;
-    cmd_sequence[3] = (uint32_t)vt + 1; // +1 enables vectoring
-    cmd_sequence[4] = (uint32_t)sp1;
-    cmd_sequence[5] = (uint32_t)blinky;
-    init_core1();
+    init_core1((uint32_t)vt, (uint32_t)sp1, (uint32_t)blinky);
     while (1) {
         asm volatile("wfi");
     }
     return 0;
 }
 
-void init_core1() {
-    uint32_t cmd;
-    uint32_t resp;
-
-    uint32_t seq = 0;
-    do {
-        cmd = cmd_sequence[seq];
-        if (!cmd) {
-            // TODO: drain FIFO
-            multicore_fifo_drain();
-            // TODO: execute SEV on core 1
-            __sev();
-        }
-        multicore_fifo_push_blocking(cmd);
-        resp = multicore_fifo_pop_blocking();
-        seq = (cmd == resp) ? (seq + 1) : 0;
-    } while (seq < 6);
-}
-
-#define SIO_BASE    0xd0000000
-#define SIO_FIFO_ST 0xd0000050
-#define SIO_FIFO_WR 0xd0000054
-#define SIO_FIFO_RD 0xd0000058
-
-void multicore_fifo_drain() {
-    uint32_t rd;
-    // read until RX is empty
-    while (*(uint32_t *)SIO_FIFO_ST & 0x1) {
-        rd = *(uint32_t *)SIO_FIFO_RD;
-    }
-    (void)rd;
-}
-
-#define __h3_unblock() asm("slt x0, x0, x1")
-
-void __sev() {
-    __h3_unblock();
-}
-
-void multicore_fifo_push_blocking(uint32_t cmd) {
-    while (!(*(uint32_t *)SIO_FIFO_ST & 0x2))
-        ;
-    *(uint32_t *)SIO_FIFO_WR = cmd;
-    __sev();
-}
-
-uint32_t multicore_fifo_pop_blocking() {
-    while (!(*(uint32_t *)SIO_FIFO_ST & 0x1))
-        ;
-    return *(uint32_t *)SIO_FIFO_RD;
-}
-
 void blinky() {
     // enable external interrupts on core 1
-    // clear pending interrupts
-    set_mstatus(0x8);
+    set_mstatus(MIE_MASK);
     clr_meifa();
     mtimer_enable();
     gpio_init(LED_PIN);
