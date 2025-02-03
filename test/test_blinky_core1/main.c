@@ -30,7 +30,7 @@ int main() {
     cmd_sequence[0] = 0;
     cmd_sequence[1] = 0;
     cmd_sequence[2] = 1;
-    cmd_sequence[3] = (uint32_t)vt;
+    cmd_sequence[3] = (uint32_t)vt + 1; // +1 enables vectoring
     cmd_sequence[4] = (uint32_t)sp1;
     cmd_sequence[5] = (uint32_t)blinky;
     init_core1();
@@ -93,9 +93,13 @@ uint32_t multicore_fifo_pop_blocking() {
 }
 
 void blinky() {
-    breakpoint();
+    // enable external interrupts on core 1
+    // clear pending interrupts
+    set_mstatus(0x8);
+    clr_meifa();
     mtimer_enable();
     gpio_init(LED_PIN);
+
     if (mtimer_start(us)) {
         asm volatile("ebreak");
     }

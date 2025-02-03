@@ -8,6 +8,10 @@
 #ifndef RP2350_H
 #define RP2350_H
 
+#define MSI_MASK 0x8
+#define MTI_MASK 0x80
+#define MEI_MASK 0x800
+
 #define RVCSR_PMPCFGM0   0xbd0
 #define RVCSR_MEIEA      0xbe0
 #define RVCSR_MEIFA      0xbe2

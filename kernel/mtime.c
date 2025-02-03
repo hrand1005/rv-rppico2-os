@@ -6,13 +6,11 @@
 /** @brief ROSC nominal frequency is 11 MHz */
 #define ROSC_NOMINAL_MHZ 11
 
-/** @brief timer enable bits for mie csr */
-#define MTIE_MASK 0x80
-
 static mtime_cache_t cache;
 
 void mtimer_enable() {
-    set_mie(MTIE_MASK);
+    clr_mip(MTI_MASK);
+    set_mie(MTI_MASK);
 }
 
 // NOTE: assumes ROSC
