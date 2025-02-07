@@ -37,3 +37,10 @@ make run APP=blinky
 - `user`    - user libraries
 - `include` - definitions common to both kernel and user code 
 - `apps`    - user application implementations. One is compiled with the RTOS at a time.
+
+## References
+
+1. riscv-privileged-20211203.pdf
+2. riscv-20191213.pdf
+3. rp2350-datasheet.pdf
+4. pico-2-pinout.pdf
