@@ -205,12 +205,12 @@ void xosc_init() {
     uint32_t xosc_ctrl;
 
     // configure XOSC
-    AT(XOSC_CTRL) |= XOSC_1_15MHZ_RANGE;
+    AT(XOSC_CTRL) = XOSC_CTRL_DISABLE_VALUE | XOSC_1_15MHZ_RANGE;
     AT(XOSC_STARTUP) = XOSC_STARTUP_DELAY;
 
     // enable XOSC
     xosc_ctrl = AT(XOSC_CTRL) & ~XOSC_CTRL_ENABLE_BITS;
-    AT(XOSC_CTRL + ATOMIC_BITSET_OFFSET) = xosc_ctrl | XOSC_CTRL_ENABLE_VALUE;
+    AT(XOSC_CTRL) = xosc_ctrl | XOSC_CTRL_ENABLE_VALUE;
 
     // block until XOSC is stable
     while (!(AT(XOSC_STATUS) & XOSC_STATUS_STABLE))
