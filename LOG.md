@@ -2124,7 +2124,8 @@ Running the program, we can discern the clock source and frequency.
 $1 = 0x0
 ```
 
-This indicates that `CLK_REF` is being used. We can check the selected ref source with the `CLK_REF_CTRL` register.
+This indicates that `CLK_REF` is being used. We can check the selected ref
+source with the `CLK_REF_CTRL` register.
 ```
 (gdb) p/x *(unsigned long *)0x40010038
 $3 = 0x1
@@ -2560,7 +2561,7 @@ void sys_led_off(exception_frame_t *);
 
 `kernel/syscall.c`:
 
-```
+```c
 #include "asm.h"
 #include "gpio.h"
 #include "rp2350.h"
@@ -2607,7 +2608,7 @@ See the source for details.
 Now, let's implement the blinky app, this time as a proper user mode
 application that invokes system calls. `apps/blinky/main.c`:
 
-```
+```c
 #include "led.h"
 #include "time.h"
 
@@ -3071,22 +3072,36 @@ void isr_mtimer_irq() {
 Note that it's important that core 0 does NOT have the timer interrupt enabled.
 We want only core 1 controlling the LED in this test.
 
-### Core 1 Initialization Refactored (02/03/2025)
+After getting things working, I put the useful core 1 initialization routines
+in `kernel/runtime.{h,c}` and `kernel/fifo.{h,c}`, then refactored
+`kernel/test_blinky_core1`.
 
-Now that we understand how to initialize core 1, let's add some helpers to our
-kernel so that we may initialize core 1 when desired.
+### UART Console (02/03/2025 - ?)
 
-`kernel/runtime.h`:
-
-```c
-
-```
-
-`kernel/runtime.c`:
-
-```c
+Let us build a bi-directional UART console, a valuable utility for
+communicating with and debugging our OS. I wired the pico 2 in accordance with
+the debug probe documentation [5]. Notably, the wiring of GPIO pins used for
+UART writes and reads creates a bidirectional connection:
 
 ```
+Debug Probe            Pico 2
+-----------            ------
+UART_TX      <--->     GPIO 0 (UART_RX default)
+UART_RX      <--->     GPIO 1 (UART_TX default)
+```
+
+The `minicom` program can be used on the development host to connect with the
+debugger. What's left is to develop the UART driver and read/write utilities to
+make meaningful communications with the debugger.
+
+### Clocks Revisited (02/05/2025 - ?)
+
+The half-baked mtimer module I created only goes so far, and to drive more precise
+communication requires a better understanding of the clocks in the system. To this
+end I created `kernel/clock.{h,c}` to get and set clock sources, measure clock
+frequencies, and more.
+
+
 
 # References
 
@@ -3094,3 +3109,4 @@ kernel so that we may initialize core 1 when desired.
 2. riscv-20191213.pdf
 3. rp2350-datasheet.pdf
 4. pico-2-pinout.pdf
+5. debug probe documentation (https://www.raspberrypi.com/documentation/microcontrollers/debug-probe.html)

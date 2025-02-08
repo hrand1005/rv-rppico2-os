@@ -38,16 +38,4 @@ int mtimer_start(uint32_t us);
  */
 // void mtimer_stop();
 
-/**
- * @brief Detects source of system clock.
- * @return Integer indicating system clock source
- */
-int _clksys_src();
-
-/**
- * @brief Detects source of reference clock.
- * @return Integer indicating reference clock source
- */
-int _clkref_src();
-
 #endif

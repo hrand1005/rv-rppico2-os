@@ -9,6 +9,7 @@
  * @author Herbie Rand
  */
 #include "asm.h"
+#include "clock.h"
 #include "gpio.h"
 #include "mtime.h"
 #include "types.h"
@@ -19,9 +20,8 @@ static uint8_t on = 0;
 static uint32_t us = 5000000;
 
 int main() {
+    clock_defaults_set();
     mtimer_enable();
-
-    // breakpoint();
 
     gpio_init(LED_PIN);
     if (mtimer_start(us)) {
