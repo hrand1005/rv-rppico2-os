@@ -2,12 +2,15 @@
 #include "asm.h"
 #include "resets.h"
 
-static uint32_t clock_frequency[] = {
-    [ROSC_CLKSRC_PH] = 0,
-    [CLKSRC_CLK_REF_AUX] = 0,
-    [XOSC_CLKSRC] = 0,
-    [LPOSC_CLKSRC] = 0,
-};
+static void _refsys_config(uint32_t rctrl, uint32_t rselected, uint32_t rdiv,
+                           uint32_t src, uint32_t auxsrc, uint32_t div);
+
+static void _nonsys_config(uint32_t rctrl, uint32_t rselected, uint32_t rdiv,
+                           uint32_t auxsrc, uint32_t div);
+
+static void _pll_init(uint32_t rcs, uint32_t rfbdiv, uint32_t rprim,
+                      uint32_t rpwr, void (*reset)(), uint32_t refdiv,
+                      uint32_t vcofreq, uint32_t postdiv1, uint32_t postdiv2);
 
 // Initializes high-precision clocks for CLK_SYS, CLK_REF, CLK_PERI...
 // Adapted from SDK and datasheet
@@ -32,105 +35,34 @@ void clock_defaults_set() {
     pll_usb_init(PLL_USB_REFDIV, PLL_USB_VCO_FREQ_HZ, PLL_USB_POSTDIV1,
                  PLL_USB_POSTDIV2);
 
-    // CLK_REF
-    // 0x2 --> XOSC source
-    // 0x0 --> irrelevant aux source
-    clkref_config(0x2, 0x0, CLK_REF_DIV_DEFAULT);
-
-    // CLK_SYS
-    // 0x1 --> AUX source
-    // 0x0 --> PLL_SYS aux source
-    clksys_config(0x1, 0x0, CLK_SYS_DIV_DEFAULT);
-
-    // CLK_USB
-    // 0x0 --> PLL_USB aux source
-    clkusb_config(0x0, CLK_USB_DIV_DEFAULT);
-
-    // CLK_ADC
-    // 0x0 --> PLL_USB aux source
-    clkadc_config(0x0, CLK_ADC_DIV_DEFAULT);
+    clkref_config(CLK_REF_SRC_DEFAULT, CLK_REF_AUXSRC_DEFAULT,
+                  CLK_REF_DIV_DEFAULT);
+    clksys_config(CLK_SYS_SRC_DEFAULT, CLK_SYS_AUXSRC_DEFAULT,
+                  CLK_SYS_DIV_DEFAULT);
+    clkusb_config(CLK_USB_AUXSRC_DEFAULT, CLK_USB_DIV_DEFAULT);
+    clkadc_config(CLK_ADC_AUXSRC_DEFAULT, CLK_ADC_DIV_DEFAULT);
 
     // ...etc
 }
 
-uint32_t clksys_src() {
-    // NOTE: one-hot encoding
-    uint32_t sys_select = AT(CLOCKS_CLK_SYS_SELECTED);
-    switch (sys_select) {
-    case 1: // CLK_REF
-        breakpoint();
-        break;
-    case 2: // CLKSRC_CLK_SYS_AUX
-        breakpoint();
-        break;
-    }
-    return 0;
-}
-
-// Some comments from SDK. Adapted from SDK
 void clksys_config(uint32_t src, uint32_t auxsrc, uint32_t div) {
     // src, auxsrc bounds checking
     if (src > 1 || auxsrc > 5) {
         breakpoint();
     }
 
-    // If increasing divisor, set divisor before source. Otherwise set source
-    // before divisor. This avoids a momentary overspeed when e.g. switching
-    // to a faster source and increasing divisor to compensate.
-    if (div > AT(CLOCKS_CLK_SYS_DIV)) {
-        AT(CLOCKS_CLK_SYS_DIV) = div;
-    }
-
-    // If switching a glitchless slice (ref or sys) to an aux source, switch
-    // away from aux *first* to avoid passing glitches when changing aux mux.
-    // Assume (!!!) glitchless source 0 is no faster than the aux source.
-    if (src == 0x1) {
-        AT(CLOCKS_CLK_SYS_CTRL + ATOMIC_BITCLR_OFFSET) = 0x3;
-        while (!(AT(CLOCKS_CLK_SYS_SELECTED) & 0x1))
-            ;
-    }
-
-    // Set aux mux first, and then glitchless mux if this clock has one
-    AT(CLOCKS_CLK_SYS_CTRL + ATOMIC_BITSET_OFFSET) = (auxsrc << 5) | src;
-    while (!(AT(CLOCKS_CLK_SYS_SELECTED) & (1 << src)))
-        ;
-
-    // Now that the source is configured, we can trust that the user-supplied
-    // divisor is a safe value.
-    AT(CLOCKS_CLK_SYS_DIV) = div;
+    _refsys_config(CLOCKS_CLK_SYS_CTRL, CLOCKS_CLK_SYS_SELECTED,
+                   CLOCKS_CLK_SYS_DIV, src, auxsrc, div);
 }
 
-// Some comments from SDK. Adapted from SDK
 void clkref_config(uint32_t src, uint32_t auxsrc, uint32_t div) {
     // src, auxsrc bounds checking
     if (src > 3 || auxsrc > 3) {
         breakpoint();
     }
 
-    // If increasing divisor, set divisor before source. Otherwise set source
-    // before divisor. This avoids a momentary overspeed when e.g. switching
-    // to a faster source and increasing divisor to compensate.
-    if (div > AT(CLOCKS_CLK_REF_DIV)) {
-        AT(CLOCKS_CLK_REF_DIV) = div;
-    }
-
-    // If switching a glitchless slice (ref or sys) to an aux source, switch
-    // away from aux *first* to avoid passing glitches when changing aux mux.
-    // Assume (!!!) glitchless source 0 is no faster than the aux source.
-    if (src == 0x1) {
-        AT(CLOCKS_CLK_REF_CTRL + ATOMIC_BITCLR_OFFSET) = 0x3;
-        while (!(AT(CLOCKS_CLK_REF_SELECTED) & 0x1))
-            ;
-    }
-
-    // Set aux mux first, and then glitchless mux if this clock has one
-    AT(CLOCKS_CLK_REF_CTRL + ATOMIC_BITSET_OFFSET) = (auxsrc << 5) | src;
-    while (!(AT(CLOCKS_CLK_REF_SELECTED) & (1 << src)))
-        ;
-
-    // Now that the source is configured, we can trust that the user-supplied
-    // divisor is a safe value.
-    AT(CLOCKS_CLK_REF_DIV) = div;
+    _refsys_config(CLOCKS_CLK_REF_CTRL, CLOCKS_CLK_REF_SELECTED,
+                   CLOCKS_CLK_REF_DIV, src, auxsrc, div);
 }
 
 void clkusb_config(uint32_t auxsrc, uint32_t div) {
@@ -139,14 +71,8 @@ void clkusb_config(uint32_t auxsrc, uint32_t div) {
         breakpoint();
     }
 
-    // If increasing divisor, set divisor before source. Otherwise set source
-    // before divisor. This avoids a momentary overspeed when e.g. switching
-    // to a faster source and increasing divisor to compensate.
-    if (div > AT(CLOCKS_CLK_USB_DIV)) {
-        AT(CLOCKS_CLK_USB_DIV) = div;
-    }
-
-    // ...not implemented :|
+    _nonsys_config(CLOCKS_CLK_USB_CTRL, CLOCKS_CLK_USB_SELECTED,
+                   CLOCKS_CLK_USB_DIV, auxsrc, div);
 }
 
 void clkperi_config(uint32_t auxsrc, uint32_t div) {
@@ -155,14 +81,8 @@ void clkperi_config(uint32_t auxsrc, uint32_t div) {
         breakpoint();
     }
 
-    // If increasing divisor, set divisor before source. Otherwise set source
-    // before divisor. This avoids a momentary overspeed when e.g. switching
-    // to a faster source and increasing divisor to compensate.
-    if (div > AT(CLOCKS_CLK_PERI_DIV)) {
-        AT(CLOCKS_CLK_PERI_DIV) = div;
-    }
-
-    // ...not implemented :|
+    _nonsys_config(CLOCKS_CLK_USB_CTRL, CLOCKS_CLK_USB_SELECTED,
+                   CLOCKS_CLK_USB_DIV, auxsrc, div);
 }
 
 void clkadc_config(uint32_t auxsrc, uint32_t div) {
@@ -170,35 +90,8 @@ void clkadc_config(uint32_t auxsrc, uint32_t div) {
     if (auxsrc > 5) {
         breakpoint();
     }
-
-    // If increasing divisor, set divisor before source. Otherwise set source
-    // before divisor. This avoids a momentary overspeed when e.g. switching
-    // to a faster source and increasing divisor to compensate.
-    if (div > AT(CLOCKS_CLK_ADC_DIV)) {
-        AT(CLOCKS_CLK_ADC_DIV) = div;
-    }
-
-    // ...not implemented :|
-}
-
-uint32_t clkref_src() {
-    // NOTE: one-hot encoding
-    uint32_t ref_select = AT(CLOCKS_CLK_REF_SELECTED);
-    switch (ref_select) {
-    case 1: // ROSC_CLKSRC_PH
-        breakpoint();
-        break;
-    case 2: // CLKSRC_CLK_REF_AUX
-        breakpoint();
-        break;
-    case 4: // XOSC_CLKSRC
-        breakpoint();
-        break;
-    case 8: // LPOSC_CLKSRC
-        breakpoint();
-        break;
-    }
-    return 0;
+    _nonsys_config(CLOCKS_CLK_USB_CTRL, CLOCKS_CLK_USB_SELECTED,
+                   CLOCKS_CLK_USB_DIV, auxsrc, div);
 }
 
 void xosc_init() {
@@ -219,60 +112,64 @@ void xosc_init() {
 
 void pll_sys_init(uint32_t refdiv, uint32_t vcofreq, uint32_t postdiv1,
                   uint32_t postdiv2) {
-    uint32_t reffreq;
-    uint32_t fbdiv;
-    uint32_t pdiv;
-    uint32_t pll_cs;
-
-    reffreq = XOSC_HZ / refdiv;
-    fbdiv = vcofreq / reffreq;
-    pdiv = (postdiv1 << 16) | (postdiv2 << 12);
-
-    // bounds-check values
-    if (vcofreq < PICO_PLL_VCO_MIN_FREQ_HZ || vcofreq > PICO_PLL_FREQ_MAX_HZ) {
-        breakpoint();
-    }
-    if (fbdiv < 16 || fbdiv > 320) {
-        breakpoint();
-    }
-    if (postdiv1 < 1 || postdiv1 > 7 || postdiv2 < 1 || postdiv2 > 7) {
-        breakpoint();
-    }
-    if (reffreq > (vcofreq / 16)) {
-        breakpoint();
-    }
-
-    // check if desired configuration is already set
-    if ((AT(PLL_SYS_CS) & 0x1F == refdiv) && (AT(PLL_SYS_FBDIV_INT) == fbdiv) &&
-        (AT(PLL_SYS_PRIM) & PLL_PRIM_MASK == pdiv)) {
-        breakpoint();
-        return;
-    }
-
-    // reset PLL block
-    pll_sys_reset_cycle();
-
-    // set dividers
-    AT(PLL_SYS_CS) = refdiv;
-    AT(PLL_SYS_FBDIV_INT) = fbdiv;
-
-    // power on PLL (VOCPD, PD)
-    AT(PLL_SYS_PWR + ATOMIC_BITCLR_OFFSET) = (1 << 5) | 1;
-
-    // wait for PLL to lock
-    while (!(AT(PLL_SYS_CS) & PLL_CS_LOCK_MASK))
-        ;
-
-    // setup post dividers
-    AT(PLL_SYS_PRIM) = pdiv;
-    // (clear POSTDIV power down bit)
-    AT(PLL_SYS_PWR + ATOMIC_BITCLR_OFFSET) = (1 << 3);
-
-    return;
+    _pll_init(PLL_SYS_CS, PLL_SYS_FBDIV_INT, PLL_SYS_PRIM, PLL_SYS_PWR,
+              pll_sys_reset_cycle, refdiv, vcofreq, postdiv1, postdiv2);
 }
 
 void pll_usb_init(uint32_t refdiv, uint32_t vcofreq, uint32_t postdiv1,
                   uint32_t postdiv2) {
+    _pll_init(PLL_USB_CS, PLL_USB_FBDIV_INT, PLL_USB_PRIM, PLL_USB_PWR,
+              pll_usb_reset_cycle, refdiv, vcofreq, postdiv1, postdiv2);
+}
+
+// Some comments from SDK. Adapted from SDK
+static void _refsys_config(uint32_t rctrl, uint32_t rselected, uint32_t rdiv,
+                           uint32_t src, uint32_t auxsrc, uint32_t div) {
+    // If increasing divisor, set divisor before source. Otherwise set source
+    // before divisor. This avoids a momentary overspeed when e.g. switching
+    // to a faster source and increasing divisor to compensate.
+    if (div > AT(rdiv)) {
+        AT(rdiv) = div;
+    }
+
+    // If switching a glitchless slice (ref or sys) to an aux source, switch
+    // away from aux *first* to avoid passing glitches when changing aux mux.
+    // Assume (!!!) glitchless source 0 is no faster than the aux source.
+    if (src == 0x1) {
+        AT(rctrl + ATOMIC_BITCLR_OFFSET) = 0x3;
+        while (!(AT(rselected) & 0x1))
+            ;
+    }
+
+    // Set aux mux first, and then glitchless mux if this clock has one
+    AT(rctrl + ATOMIC_BITSET_OFFSET) = (auxsrc << 5) | src;
+    while (!(AT(rselected) & (1 << src)))
+        ;
+
+    // Now that the source is configured, we can trust that the user-supplied
+    // divisor is a safe value.
+    AT(rdiv) = div;
+}
+
+static void _nonsys_config(uint32_t rctrl, uint32_t rselected, uint32_t rdiv,
+                           uint32_t auxsrc, uint32_t div) {
+    // If increasing divisor, set divisor before source. Otherwise set source
+    // before divisor. This avoids a momentary overspeed when e.g. switching
+    // to a faster source and increasing divisor to compensate.
+    if (div > AT(rdiv)) {
+        AT(rdiv) = div;
+    }
+
+    // TODO: implement this shiet
+    (void)rctrl;
+    (void)rselected;
+    (void)auxsrc;
+    (void)div;
+}
+
+static void _pll_init(uint32_t rcs, uint32_t rfbdiv, uint32_t rprim,
+                      uint32_t rpwr, void (*reset)(), uint32_t refdiv,
+                      uint32_t vcofreq, uint32_t postdiv1, uint32_t postdiv2) {
     uint32_t reffreq;
     uint32_t fbdiv;
     uint32_t pdiv;
@@ -297,30 +194,28 @@ void pll_usb_init(uint32_t refdiv, uint32_t vcofreq, uint32_t postdiv1,
     }
 
     // check if desired configuration is already set
-    if ((AT(PLL_USB_CS) & 0x1F == refdiv) && (AT(PLL_USB_FBDIV_INT) == fbdiv) &&
-        (AT(PLL_USB_PRIM) & PLL_PRIM_MASK == pdiv)) {
+    if ((AT(rcs) & 0x1F == refdiv) && (AT(rfbdiv) == fbdiv) &&
+        (AT(rprim) & PLL_PRIM_MASK == pdiv)) {
         breakpoint();
         return;
     }
 
     // reset PLL block
-    pll_usb_reset_cycle();
+    reset();
 
     // set dividers
-    AT(PLL_USB_CS) = refdiv;
-    AT(PLL_USB_FBDIV_INT) = fbdiv;
+    AT(rcs) = refdiv;
+    AT(rfbdiv) = fbdiv;
 
     // power on PLL (VOCPD, PD)
-    AT(PLL_USB_PWR + ATOMIC_BITCLR_OFFSET) = (1 << 5) | 1;
+    AT(rpwr + ATOMIC_BITCLR_OFFSET) = (1 << 5) | 1;
 
     // wait for PLL to lock
-    while (!(AT(PLL_USB_CS) & PLL_CS_LOCK_MASK))
+    while (!(AT(rcs) & PLL_CS_LOCK_MASK))
         ;
 
     // setup post dividers
-    AT(PLL_USB_PRIM) = pdiv;
+    AT(rprim) = pdiv;
     // (clear POSTDIV power down bit)
-    AT(PLL_USB_PWR + ATOMIC_BITCLR_OFFSET) = (1 << 0x3);
-
-    return;
+    AT(rpwr + ATOMIC_BITCLR_OFFSET) = (1 << 0x3);
 }

@@ -5,15 +5,29 @@
 #include "rp2350.h"
 #include "types.h"
 
-#define ROSC_CLKSRC_PH     1
-#define CLKSRC_CLK_REF_AUX 2
-#define XOSC_CLKSRC        3
-#define LPOSC_CLKSRC       4
+#define CLK_GPOUT_SRC_DEFAULT 0x0
+#define CLK_REF_SRC_DEFAULT   0x2 // XOSC SRC
+#define CLK_SYS_SRC_DEFAULT   0x1 // AUX SRC
+#define CLK_PERI_SRC_DEFAULT  0x0
+#define CLK_HSTX_SRC_DEFAULT  0x0
+#define CLK_USB_SRC_DEFAULT   0x0
+#define CLK_ADC_SRC_DEFAULT   0x0
 
-#define CLK_REF_DIV_DEFAULT 0x10000
-#define CLK_SYS_DIV_DEFAULT 0x10000
-#define CLK_ADC_DIV_DEFAULT 0x0
-#define CLK_USB_DIV_DEFAULT 0x0
+#define CLK_GPOUT_AUXSRC_DEFAULT 0x6
+#define CLK_REF_AUXSRC_DEFAULT   0x0
+#define CLK_SYS_AUXSRC_DEFAULT   0x0
+#define CLK_PERI_AUXSRC_DEFAULT  0x4
+#define CLK_HSTX_SRC_DEFAULT     0x0
+#define CLK_USB_AUXSRC_DEFAULT   0x0
+#define CLK_ADC_AUXSRC_DEFAULT   0x0
+
+#define CLK_GPOUT_DIV_DEFAULT 0x10000
+#define CLK_REF_DIV_DEFAULT   0x10000
+#define CLK_SYS_DIV_DEFAULT   0x10000
+#define CLK_PERI_DIV_DEFAULT  0x10000
+#define CLK_HSTX_DIV_DEFAULT  0x10000
+#define CLK_USB_DIV_DEFAULT   0x10000
+#define CLK_ADC_DIV_DEFAULT   0x10000
 
 /**
  * PLL_SYS Parameters computed by vcocalc.py.
@@ -44,34 +58,45 @@
 
 /**
  * @brief Sets up default clock sources for CLK_SYS, CLK_REF, CLK_USB, etc.
- *
  */
 void clock_defaults_set();
 
+/**
+ * @brief Applies the provided configuration to CLK_SYS.
+ * @param src Integer indicating high-level clock source
+ * @param auxsrc Integer indicating specific aux clock source
+ * @param div Integer value for divider register
+ */
 void clksys_config(uint32_t src, uint32_t auxsrc, uint32_t div);
+
+/**
+ * @brief Applies the provided configuration to CLK_REF.
+ * @param src Integer indicating high-level clock source
+ * @param auxsrc Integer indicating specific aux clock source
+ * @param div Integer value for divider register
+ */
 void clkref_config(uint32_t src, uint32_t auxsrc, uint32_t div);
 
-void clkadc_config(uint32_t auxsrc, uint32_t div);
+/**
+ * @brief Applies the provided configuration to CLK_USB.
+ * @param auxsrc Integer indicating specific aux clock source
+ * @param div Integer value for divider register
+ */
 void clkusb_config(uint32_t auxsrc, uint32_t div);
+
+/**
+ * @brief Applies the provided configuration to CLK_PERI.
+ * @param auxsrc Integer indicating specific aux clock source
+ * @param div Integer value for divider register
+ */
 void clkperi_config(uint32_t auxsrc, uint32_t div);
 
 /**
- * @brief Detects source of system clock.
- * @return Integer indicating system clock source
+ * @brief Applies the provided configuration to CLK_ADC.
+ * @param auxsrc Integer indicating specific aux clock source
+ * @param div Integer value for divider register
  */
-uint32_t clksys_src();
-
-/**
- * @brief Detects source of reference clock.
- * @return Integer indicating reference clock source
- */
-uint32_t clkref_src();
-
-/**
- * @brief Detects source of peripheral clock.
- * @return Integer indicating peripheral clock source
- */
-uint32_t clkperi_src();
+void clkadc_config(uint32_t auxsrc, uint32_t div);
 
 /**
  * @brief Sets XOSC as clock source.
@@ -80,8 +105,11 @@ uint32_t clkperi_src();
 void xosc_init();
 
 /**
- * @brief Initializes pll with provided parameters.
- *
+ * @brief Initializes SYS pll.
+ * @param refdiv Integer reference divisor
+ * @param vcofreq Integer VCO frequency (hz)
+ * @param postidv1 Integer post divider (should be higher than postdiv2)
+ * @param postidv2 Integer post divider (secondary)
  * @see pico SDK `rp2_common/hardware_clocks/scripts/vcocalc.py`
  * @see rp2350 datasheet 8.6.3.2
  */
@@ -89,14 +117,15 @@ void pll_sys_init(uint32_t refdiv, uint32_t vcofreq, uint32_t postdiv1,
                   uint32_t postdiv2);
 
 /**
- * @brief Initializes pll with provided parameters.
- *
- * Effective parameters for a target operating frequency may be determined
- * using
- *
+ * @brief Initializes USB pll.
+ * @param refdiv Integer reference divisor
+ * @param vcofreq Integer VCO frequency (hz)
+ * @param postidv1 Integer post divider (should be higher than postdiv2)
+ * @param postidv2 Integer post divider (secondary)
  * @see pico SDK `rp2_common/hardware_clocks/scripts/vcocalc.py`
  * @see rp2350 datasheet 8.6.3.2
  */
-void pll_usb_init();
+void pll_usb_init(uint32_t refdiv, uint32_t vcofreq, uint32_t postdiv1,
+                  uint32_t postdiv2);
 
 #endif
