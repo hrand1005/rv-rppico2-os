@@ -35,17 +35,18 @@ void clock_defaults_set() {
     pll_usb_init(PLL_USB_REFDIV, PLL_USB_VCO_FREQ_HZ, PLL_USB_POSTDIV1,
                  PLL_USB_POSTDIV2);
 
-    clkref_config(CLK_REF_SRC_DEFAULT, CLK_REF_AUXSRC_DEFAULT,
-                  CLK_REF_DIV_DEFAULT);
-    clksys_config(CLK_SYS_SRC_DEFAULT, CLK_SYS_AUXSRC_DEFAULT,
-                  CLK_SYS_DIV_DEFAULT);
-    clkusb_config(CLK_USB_AUXSRC_DEFAULT, CLK_USB_DIV_DEFAULT);
-    clkadc_config(CLK_ADC_AUXSRC_DEFAULT, CLK_ADC_DIV_DEFAULT);
+    clk_ref_config(CLK_REF_SRC_DEFAULT, CLK_REF_AUXSRC_DEFAULT,
+                   CLK_REF_DIV_DEFAULT);
+    clk_sys_config(CLK_SYS_SRC_DEFAULT, CLK_SYS_AUXSRC_DEFAULT,
+                   CLK_SYS_DIV_DEFAULT);
+    clk_peri_config(CLK_PERI_AUXSRC_DEFAULT, CLK_PERI_DIV_DEFAULT);
+    clk_usb_config(CLK_USB_AUXSRC_DEFAULT, CLK_USB_DIV_DEFAULT);
+    clk_adc_config(CLK_ADC_AUXSRC_DEFAULT, CLK_ADC_DIV_DEFAULT);
 
     // ...etc
 }
 
-void clksys_config(uint32_t src, uint32_t auxsrc, uint32_t div) {
+void clk_sys_config(uint32_t src, uint32_t auxsrc, uint32_t div) {
     // src, auxsrc bounds checking
     if (src > 1 || auxsrc > 5) {
         breakpoint();
@@ -55,7 +56,7 @@ void clksys_config(uint32_t src, uint32_t auxsrc, uint32_t div) {
                    CLOCKS_CLK_SYS_DIV, src, auxsrc, div);
 }
 
-void clkref_config(uint32_t src, uint32_t auxsrc, uint32_t div) {
+void clk_ref_config(uint32_t src, uint32_t auxsrc, uint32_t div) {
     // src, auxsrc bounds checking
     if (src > 3 || auxsrc > 3) {
         breakpoint();
@@ -65,7 +66,7 @@ void clkref_config(uint32_t src, uint32_t auxsrc, uint32_t div) {
                    CLOCKS_CLK_REF_DIV, src, auxsrc, div);
 }
 
-void clkusb_config(uint32_t auxsrc, uint32_t div) {
+void clk_usb_config(uint32_t auxsrc, uint32_t div) {
     // src, auxsrc bounds checking
     if (auxsrc > 6) {
         breakpoint();
@@ -75,7 +76,7 @@ void clkusb_config(uint32_t auxsrc, uint32_t div) {
                    CLOCKS_CLK_USB_DIV, auxsrc, div);
 }
 
-void clkperi_config(uint32_t auxsrc, uint32_t div) {
+void clk_peri_config(uint32_t auxsrc, uint32_t div) {
     // src, auxsrc bounds checking
     if (auxsrc > 6) {
         breakpoint();
@@ -85,7 +86,7 @@ void clkperi_config(uint32_t auxsrc, uint32_t div) {
                    CLOCKS_CLK_USB_DIV, auxsrc, div);
 }
 
-void clkadc_config(uint32_t auxsrc, uint32_t div) {
+void clk_adc_config(uint32_t auxsrc, uint32_t div) {
     // src, auxsrc bounds checking
     if (auxsrc > 5) {
         breakpoint();

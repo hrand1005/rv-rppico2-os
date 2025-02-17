@@ -5,18 +5,14 @@
 #include "rp2350.h"
 #include "types.h"
 
-#define CLK_GPOUT_SRC_DEFAULT 0x0
-#define CLK_REF_SRC_DEFAULT   0x2 // XOSC SRC
-#define CLK_SYS_SRC_DEFAULT   0x1 // AUX SRC
-#define CLK_PERI_SRC_DEFAULT  0x0
-#define CLK_HSTX_SRC_DEFAULT  0x0
-#define CLK_USB_SRC_DEFAULT   0x0
-#define CLK_ADC_SRC_DEFAULT   0x0
+/** Note sources are only relevant for CLK_SYS and CLK_REF */
+#define CLK_REF_SRC_DEFAULT 0x2 // XOSC SRC
+#define CLK_SYS_SRC_DEFAULT 0x1 // AUX SRC
 
 #define CLK_GPOUT_AUXSRC_DEFAULT 0x6
 #define CLK_REF_AUXSRC_DEFAULT   0x0
 #define CLK_SYS_AUXSRC_DEFAULT   0x0
-#define CLK_PERI_AUXSRC_DEFAULT  0x4
+#define CLK_PERI_AUXSRC_DEFAULT  0x0
 #define CLK_HSTX_SRC_DEFAULT     0x0
 #define CLK_USB_AUXSRC_DEFAULT   0x0
 #define CLK_ADC_AUXSRC_DEFAULT   0x0
@@ -67,7 +63,7 @@ void clock_defaults_set();
  * @param auxsrc Integer indicating specific aux clock source
  * @param div Integer value for divider register
  */
-void clksys_config(uint32_t src, uint32_t auxsrc, uint32_t div);
+void clk_sys_config(uint32_t src, uint32_t auxsrc, uint32_t div);
 
 /**
  * @brief Applies the provided configuration to CLK_REF.
@@ -75,28 +71,28 @@ void clksys_config(uint32_t src, uint32_t auxsrc, uint32_t div);
  * @param auxsrc Integer indicating specific aux clock source
  * @param div Integer value for divider register
  */
-void clkref_config(uint32_t src, uint32_t auxsrc, uint32_t div);
+void clk_ref_config(uint32_t src, uint32_t auxsrc, uint32_t div);
 
 /**
  * @brief Applies the provided configuration to CLK_USB.
  * @param auxsrc Integer indicating specific aux clock source
  * @param div Integer value for divider register
  */
-void clkusb_config(uint32_t auxsrc, uint32_t div);
+void clk_usb_config(uint32_t auxsrc, uint32_t div);
 
 /**
  * @brief Applies the provided configuration to CLK_PERI.
  * @param auxsrc Integer indicating specific aux clock source
  * @param div Integer value for divider register
  */
-void clkperi_config(uint32_t auxsrc, uint32_t div);
+void clk_peri_config(uint32_t auxsrc, uint32_t div);
 
 /**
  * @brief Applies the provided configuration to CLK_ADC.
  * @param auxsrc Integer indicating specific aux clock source
  * @param div Integer value for divider register
  */
-void clkadc_config(uint32_t auxsrc, uint32_t div);
+void clk_adc_config(uint32_t auxsrc, uint32_t div);
 
 /**
  * @brief Sets XOSC as clock source.

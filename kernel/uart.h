@@ -1,3 +1,8 @@
+/**
+ * @file uart.h
+ * @brief UART functions, currently uses UART instance 0 only.
+ * @author Herbie Rand
+ */
 #ifndef UART_H
 #define UART_H
 
@@ -15,7 +20,7 @@ void uart_init();
  * @brief Writes a single character to the UART0 transmit buffer.
  * @param c     Byte to transmit
  */
-void uart_put(char c);
+void uart_putc(char c);
 
 /**
  * @brief Gets a single character from teh UART0 receive buffer.

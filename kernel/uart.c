@@ -1,38 +1,40 @@
 #include "uart.h"
 #include "asm.h"
 #include "gpio.h"
+#include "resets.h"
 #include "rp2350.h"
 
 #define BAUDRATE 115200
 
-// For now, let's implement this with no FIFO or DMA, KISS
-// hardcode instance uart0
+static __inline void _uart_set_default_format();
 
 void uart_init() {
+    // uart_reset_cycle();
 
-    // get clock hz
-
-    // reset
-    // unreset
-    // set translate clrf
+    // TODO: set translate clrf, if necessary
     uint32_t baud = uart_set_baudrate(BAUDRATE);
 
     // set frame parameters
+    _uart_set_default_format();
 
     // enable uart, tx, rx
     AT(UART0_UARTCR) = (UARTCR_UARTEN | UARTCR_TXE | UARTCR_RXE);
-    //
+
     // set gpio pins for uart instance 0
     gpio_init_func(0, 0x2); // init GPIO0 to UART0_TX
     gpio_init_func(1, 0x2); // init GPIO1 to UART0_RX
+
+    // TODO: enable DMA requests
+
+    (void)baud;
 }
 
-void uart_put(char c) {
+void uart_putc(char c) {
     // wait for TX FIFO to have space
     while (AT(UART0_UARTFR) & UARTFR_TXFF)
         ;
     // write char to TX FIFO
-    // AT(UART0_UARTDR) = c;
+    AT(UART0_UARTDR) = c;
 }
 
 char uart_get() {
@@ -68,13 +70,25 @@ uint32_t uart_set_baudrate(uint32_t baudrate) {
     cr_save = AT(UART0_UARTCR);
 
     // insert delay, if outstanding transmit/receive
-    if (cr_save & UARTCR_UARTEN) {
-        breakpoint();
-        for (uint32_t i = 0; i < 10000; i++)
-            ; // idk...
-    }
+    // if (cr_save & UARTCR_UARTEN) {
+    //     breakpoint();
+    //     for (uint32_t i = 0; i < 10000; i++)
+    //         ; // idk...
+    // }
     AT(UART0_UARTLCR_H) = 0;
     AT(UART0_UARTCR) = cr_save;
 
     return (4 * UART_CLOCK_HZ) / (64 * baud_ibrd + baud_fbrd);
+}
+
+// See UARTLCR_H Documentation.
+static __inline void _uart_set_default_format() {
+    uint32_t wlen = 8;
+    uint32_t stp2 = 1;
+    uint32_t fen = 1;
+    uint32_t pen = 0;
+    uint32_t lcr =
+        ((wlen - 5) << 5) | (fen << 4) | ((stp2 - 1) << 3) | (pen << 1);
+
+    AT(UART0_UARTLCR_H + ATOMIC_BITSET_OFFSET) = lcr;
 }

@@ -3101,6 +3101,72 @@ communication requires a better understanding of the clocks in the system. To th
 end I created `kernel/clock.{h,c}` to get and set clock sources, measure clock
 frequencies, and more.
 
+### ... CUT to 2/09/2025
+
+Well, that required quite the detour -- I had to fix clocks. As it turns out, I
+had been using the default clock configuration (ROSC) on startup, but allowed bugs
+in timing to persist because I had been adopting a policy wherein I run blinky
+built with the SDK if I think I corrupt any configuration. This would cause me
+to configure the high-precision crystal oscilator (XOSC), thus eliminating timing
+errors. To resolve this, I created `clock.{h,c}` and `resets.{h,c}` to perform
+clock and PLL configuration.
+
+Importantly, I intend to call `clock_defaults_set` as part of the startup
+initialization. Without getting into gory details, you can see that this
+function initializes the high-precision crystal oscilator (`xosc_init`),
+initializes PLLs to drive the system clock and USB clock, and sets the sources
+for each (relevant) clock:
+
+```c
+// Initializes high-precision clocks for CLK_SYS, CLK_REF, CLK_PERI...
+// Adapted from SDK and datasheet
+void clock_defaults_set() {
+    AT(CLOCKS_CLK_SYS_RESUS_CTRL) = 0;
+
+    // Enable the xosc
+    xosc_init();
+
+    // Before we touch PLLs, switch sys and ref cleanly away from their aux
+    // sources. switch CLK_SYS, CLK_REF away from AUX clocks if required
+    AT(CLOCKS_CLK_SYS_CTRL + ATOMIC_BITCLR_OFFSET) = 0x3;
+    while (AT(CLOCKS_CLK_SYS_SELECTED) != 0x1)
+        ;
+
+    AT(CLOCKS_CLK_REF_CTRL + ATOMIC_BITCLR_OFFSET) = 0x3;
+    while (AT(CLOCKS_CLK_REF_SELECTED) != 0x1)
+        ;
+
+    pll_sys_init(PLL_SYS_REFDIV, PLL_SYS_VCO_FREQ_HZ, PLL_SYS_POSTDIV1,
+                 PLL_SYS_POSTDIV2);
+    pll_usb_init(PLL_USB_REFDIV, PLL_USB_VCO_FREQ_HZ, PLL_USB_POSTDIV1,
+                 PLL_USB_POSTDIV2);
+
+    clk_ref_config(CLK_REF_SRC_DEFAULT, CLK_REF_AUXSRC_DEFAULT,
+                  CLK_REF_DIV_DEFAULT);
+    clk_sys_config(CLK_SYS_SRC_DEFAULT, CLK_SYS_AUXSRC_DEFAULT,
+                  CLK_SYS_DIV_DEFAULT);
+    clk_peri_config(CLK_PERI_AUXSRC_DEFAULT, CLK_PERI_DIV_DEFAULT);
+    clk_usb_config(CLK_USB_AUXSRC_DEFAULT, CLK_USB_DIV_DEFAULT);
+    clk_adc_config(CLK_ADC_AUXSRC_DEFAULT, CLK_ADC_DIV_DEFAULT);
+
+    // ...etc
+}
+```
+
+Not all clocks (e.g. GPOUT0-N) are fully configured, but if they become important
+later they will also be given a default configuration in this function.
+
+### Returning to UART (02/09/2025)
+
+Let us return to the UART implementation. CLK_PERI must support the required
+range of baud rates. If we use XOSC to drive CLK_PERI (without any dividers),
+CLK_PERI operates at 12 MHz, which would supports the following range of baud
+rates:
+
+```
+min: **750000** (12 MHz = 16 * (max baud rate))
+max: **12** (12 MHz <= 16 * 65535 * (min baud rate))
+```
 
 
 # References
