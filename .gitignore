@@ -59,3 +59,7 @@ docs/*.idx
 
 # Build artifacts
 build/*
+
+# Auto-generated
+init.gdb
+memmap.ld
