@@ -13,7 +13,7 @@
 #define CLK_REF_AUXSRC_DEFAULT   0x0
 #define CLK_SYS_AUXSRC_DEFAULT   0x0
 #define CLK_PERI_AUXSRC_DEFAULT  0x0
-#define CLK_HSTX_SRC_DEFAULT     0x0
+#define CLK_HSTX_AUXSRC_DEFAULT  0x0
 #define CLK_USB_AUXSRC_DEFAULT   0x0
 #define CLK_ADC_AUXSRC_DEFAULT   0x0
 
@@ -93,6 +93,13 @@ void clk_peri_config(uint32_t auxsrc, uint32_t div);
  * @param div Integer value for divider register
  */
 void clk_adc_config(uint32_t auxsrc, uint32_t div);
+
+/**
+ * @brief Applies the provided configuration to CLK_HSTX.
+ * @param auxsrc Integer indicating specific aux clock source
+ * @param div Integer value for divider register
+ */
+void clk_hstx_config(uint32_t auxsrc, uint32_t div);
 
 /**
  * @brief Sets XOSC as clock source.

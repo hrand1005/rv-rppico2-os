@@ -1,4 +1,5 @@
 #include "gpio.h"
+#include "asm.h"
 #include "rp2350.h"
 
 void gpio_init(uint32_t pin) {
@@ -34,4 +35,18 @@ void gpio_set(uint32_t pin) {
 
 void gpio_clr(uint32_t pin) {
     *(uint32_t *)SIO_GPIO_OUT_CLR = (1 << pin);
+}
+
+void gpio_set_func(uint32_t pin, uint32_t fn) {
+    // TODO: validate inputs
+    // Set input enable on, output disable off
+    uint32_t val = AT(PADS_BANK0_BASE + 0x4 * pin);
+    val &= ~(1 << 7); // clear output disable bit
+    val |= (1 << 6);  // set input enable bit
+    AT((PADS_BANK0_BASE + 0x4) + (pin * 0x4)) = val;
+
+    // clear fields except for funcsel (at LSBs)
+    AT((IO_BANK0_BASE + 0x4) + (pin * 0x8)) = fn;
+    // remove pad isolation
+    AT((PADS_BANK0_BASE + 0x4) + (pin * 0x4) + ATOMIC_BITCLR_OFFSET) = 0x100;
 }

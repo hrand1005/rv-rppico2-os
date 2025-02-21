@@ -7,7 +7,7 @@
  * @brief Access memory-mapped register value,
  *        may also be used for assignment
  */
-#define AT(addr) ((*(volatile uint32_t *)(addr)))
+#define AT(addr) (*(volatile uint32_t *)(addr))
 
 /**
  * @brief Triggers breakpoint (ebreak).

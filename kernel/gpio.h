@@ -30,4 +30,12 @@ void gpio_set(uint32_t pin);
  */
 void gpio_clr(uint32_t pin);
 
+/**
+ * @brief Initializes GPIO with provided function on the selected pin.
+ *
+ * @param pin       Integer GPIO pin
+ * @param funcsel   Integer function select
+ */
+void gpio_set_func(uint32_t pin, uint32_t fn);
+
 #endif

@@ -9,7 +9,10 @@
 static __inline void _uart_set_default_format();
 
 void uart_init() {
-    // uart_reset_cycle();
+    // set uart functions on GPIO0 and GPIO1, and remove pad isolation control
+    gpio_set_func(0, 2);
+    gpio_set_func(1, 2);
+    uart_reset_cycle();
 
     // TODO: set translate clrf, if necessary
     uint32_t baud = uart_set_baudrate(BAUDRATE);
@@ -21,8 +24,8 @@ void uart_init() {
     AT(UART0_UARTCR) = (UARTCR_UARTEN | UARTCR_TXE | UARTCR_RXE);
 
     // set gpio pins for uart instance 0
-    gpio_init_func(0, 0x2); // init GPIO0 to UART0_TX
-    gpio_init_func(1, 0x2); // init GPIO1 to UART0_RX
+    // gpio_init_func(0, 0x2); // init GPIO0 to UART0_TX
+    // gpio_init_func(1, 0x2); // init GPIO1 to UART0_RX
 
     // TODO: enable DMA requests
 

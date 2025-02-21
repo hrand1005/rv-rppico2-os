@@ -42,8 +42,7 @@ void clock_defaults_set() {
     clk_peri_config(CLK_PERI_AUXSRC_DEFAULT, CLK_PERI_DIV_DEFAULT);
     clk_usb_config(CLK_USB_AUXSRC_DEFAULT, CLK_USB_DIV_DEFAULT);
     clk_adc_config(CLK_ADC_AUXSRC_DEFAULT, CLK_ADC_DIV_DEFAULT);
-
-    // ...etc
+    clk_hstx_config(CLK_HSTX_AUXSRC_DEFAULT, CLK_HSTX_DIV_DEFAULT);
 }
 
 void clk_sys_config(uint32_t src, uint32_t auxsrc, uint32_t div) {
@@ -82,8 +81,8 @@ void clk_peri_config(uint32_t auxsrc, uint32_t div) {
         breakpoint();
     }
 
-    _nonsys_config(CLOCKS_CLK_USB_CTRL, CLOCKS_CLK_USB_SELECTED,
-                   CLOCKS_CLK_USB_DIV, auxsrc, div);
+    _nonsys_config(CLOCKS_CLK_PERI_CTRL, CLOCKS_CLK_PERI_SELECTED,
+                   CLOCKS_CLK_PERI_DIV, auxsrc, div);
 }
 
 void clk_adc_config(uint32_t auxsrc, uint32_t div) {
@@ -91,8 +90,17 @@ void clk_adc_config(uint32_t auxsrc, uint32_t div) {
     if (auxsrc > 5) {
         breakpoint();
     }
-    _nonsys_config(CLOCKS_CLK_USB_CTRL, CLOCKS_CLK_USB_SELECTED,
-                   CLOCKS_CLK_USB_DIV, auxsrc, div);
+    _nonsys_config(CLOCKS_CLK_ADC_CTRL, CLOCKS_CLK_ADC_SELECTED,
+                   CLOCKS_CLK_ADC_DIV, auxsrc, div);
+}
+
+void clk_hstx_config(uint32_t auxsrc, uint32_t div) {
+    // src, auxsrc bounds checking
+    if (auxsrc > 4) {
+        breakpoint();
+    }
+    _nonsys_config(CLOCKS_CLK_HSTX_CTRL, CLOCKS_CLK_HSTX_SELECTED,
+                   CLOCKS_CLK_HSTX_DIV, auxsrc, div);
 }
 
 void xosc_init() {
@@ -161,11 +169,23 @@ static void _nonsys_config(uint32_t rctrl, uint32_t rselected, uint32_t rdiv,
         AT(rdiv) = div;
     }
 
-    // TODO: implement this shiet
-    (void)rctrl;
-    (void)rselected;
-    (void)auxsrc;
-    (void)div;
+    // disable clock
+    AT(rctrl + ATOMIC_BITCLR_OFFSET) = (1 << 11);
+
+    // TODO: spin for a bit until ENABLE bit propogates
+    for (uint32_t i = 0; i < 10000; i++)
+        ;
+
+    // set aux mux
+    AT(rctrl + ATOMIC_BITSET_OFFSET) = auxsrc << 5;
+
+    // enable clock
+    AT(rctrl + ATOMIC_BITSET_OFFSET) = 1 << 11;
+
+    // set div
+    AT(rdiv) = div;
+
+    // TODO: save frequency
 }
 
 static void _pll_init(uint32_t rcs, uint32_t rfbdiv, uint32_t rprim,
