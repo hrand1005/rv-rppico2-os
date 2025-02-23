@@ -2,6 +2,9 @@
 #include "asm.h"
 #include "resets.h"
 
+static uint32_t _clk_sys_freq_mhz = 0;
+static uint32_t _clk_ref_freq_mhz = 0;
+
 static void _refsys_config(uint32_t rctrl, uint32_t rselected, uint32_t rdiv,
                            uint32_t src, uint32_t auxsrc, uint32_t div);
 
@@ -37,12 +40,24 @@ void clock_defaults_set() {
 
     clk_ref_config(CLK_REF_SRC_DEFAULT, CLK_REF_AUXSRC_DEFAULT,
                    CLK_REF_DIV_DEFAULT);
+    _clk_ref_freq_mhz = 12;
+
     clk_sys_config(CLK_SYS_SRC_DEFAULT, CLK_SYS_AUXSRC_DEFAULT,
                    CLK_SYS_DIV_DEFAULT);
+    _clk_sys_freq_mhz = 150;
+
     clk_peri_config(CLK_PERI_AUXSRC_DEFAULT, CLK_PERI_DIV_DEFAULT);
     clk_usb_config(CLK_USB_AUXSRC_DEFAULT, CLK_USB_DIV_DEFAULT);
     clk_adc_config(CLK_ADC_AUXSRC_DEFAULT, CLK_ADC_DIV_DEFAULT);
     clk_hstx_config(CLK_HSTX_AUXSRC_DEFAULT, CLK_HSTX_DIV_DEFAULT);
+}
+
+uint32_t clk_sys_freq_mhz() {
+    return _clk_sys_freq_mhz;
+}
+
+uint32_t clk_ref_freq_mhz() {
+    return _clk_ref_freq_mhz;
 }
 
 void clk_sys_config(uint32_t src, uint32_t auxsrc, uint32_t div) {
@@ -194,7 +209,6 @@ static void _pll_init(uint32_t rcs, uint32_t rfbdiv, uint32_t rprim,
     uint32_t reffreq;
     uint32_t fbdiv;
     uint32_t pdiv;
-    uint32_t pll_cs;
 
     reffreq = XOSC_HZ / refdiv;
     fbdiv = vcofreq / reffreq;
@@ -215,7 +229,7 @@ static void _pll_init(uint32_t rcs, uint32_t rfbdiv, uint32_t rprim,
     }
 
     // check if desired configuration is already set
-    if ((AT(rcs) & 0x1F == refdiv) && (AT(rfbdiv) == fbdiv) &&
+    if ((AT(rcs) & 0x1f == refdiv) && (AT(rfbdiv) == fbdiv) &&
         (AT(rprim) & PLL_PRIM_MASK == pdiv)) {
         breakpoint();
         return;
@@ -238,5 +252,5 @@ static void _pll_init(uint32_t rcs, uint32_t rfbdiv, uint32_t rprim,
     // setup post dividers
     AT(rprim) = pdiv;
     // (clear POSTDIV power down bit)
-    AT(rpwr + ATOMIC_BITCLR_OFFSET) = (1 << 0x3);
+    AT(rpwr + ATOMIC_BITCLR_OFFSET) = (1 << 3);
 }

@@ -9,13 +9,13 @@
 #define CLK_REF_SRC_DEFAULT 0x2 // XOSC SRC
 #define CLK_SYS_SRC_DEFAULT 0x1 // AUX SRC
 
-#define CLK_GPOUT_AUXSRC_DEFAULT 0x6
-#define CLK_REF_AUXSRC_DEFAULT   0x0
-#define CLK_SYS_AUXSRC_DEFAULT   0x0
-#define CLK_PERI_AUXSRC_DEFAULT  0x0
-#define CLK_HSTX_AUXSRC_DEFAULT  0x0
-#define CLK_USB_AUXSRC_DEFAULT   0x0
-#define CLK_ADC_AUXSRC_DEFAULT   0x0
+#define CLK_GPOUT_AUXSRC_DEFAULT 0x6 // 0x6 -> XOSC
+#define CLK_REF_AUXSRC_DEFAULT   0x0 // 0x0 -> CLK_PLL_USB
+#define CLK_SYS_AUXSRC_DEFAULT   0x0 // 0x0 -> CLK_PLL_SYS
+#define CLK_PERI_AUXSRC_DEFAULT  0x0 // 0x0 -> CLK_SYS
+#define CLK_HSTX_AUXSRC_DEFAULT  0x0 // 0x0 -> CLK_SYS
+#define CLK_USB_AUXSRC_DEFAULT   0x0 // 0x0 -> CLK_PLL_USB
+#define CLK_ADC_AUXSRC_DEFAULT   0x0 // 0x0 -> CLK_PLL_USB
 
 #define CLK_GPOUT_DIV_DEFAULT 0x10000
 #define CLK_REF_DIV_DEFAULT   0x10000
@@ -56,6 +56,18 @@
  * @brief Sets up default clock sources for CLK_SYS, CLK_REF, CLK_USB, etc.
  */
 void clock_defaults_set();
+
+/**
+ * @brief Returns CLK_SYS frequency in MHZ.
+ * @returns Integer MHz CLK_SYS frequency
+ */
+uint32_t clk_sys_freq_mhz();
+
+/**
+ * @brief Returns CLK_REF frequency in MHZ.
+ * @returns Integer MHz CLK_REF frequency
+ */
+uint32_t clk_ref_freq_mhz();
 
 /**
  * @brief Applies the provided configuration to CLK_SYS.

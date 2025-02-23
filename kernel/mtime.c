@@ -1,10 +1,8 @@
 #include "mtime.h"
 #include "asm.h"
+#include "clock.h"
 #include "rp2350.h"
 #include "types.h"
-
-/** @brief XOSC nominal frequency is 11 MHz */
-#define XOSC_NOMINAL_MHZ 11
 
 static mtime_cache_t cache;
 
@@ -13,11 +11,10 @@ void mtimer_enable() {
     set_mie(MTI_MASK);
 }
 
-// NOTE: assumes XOSC
 int mtimer_start(uint32_t us) {
     uint32_t lo = 0;
     uint32_t hi = 0;
-    uint32_t coef = XOSC_NOMINAL_MHZ;
+    uint32_t coef = clk_ref_freq_mhz();
 
     if (us == cache.us) {
         lo = cache.mtimecmp;
@@ -44,4 +41,18 @@ int mtimer_start(uint32_t us) {
     AT(SIO_MTIMECMP) = lo;
     AT(SIO_MTIME_CTRL) = 3;
     return 0;
+}
+
+#include "clock.h"
+
+// Some tests indicate that each loop takes ~5 cycles.
+// Either that, or I have misconfigured something else.
+// But the frequency counter indicates that the clock
+// sources are configured correctly.
+// See test/test_clk_frequency for details.
+void spin_us(uint32_t us) {
+    uint32_t mhz = clk_sys_freq_mhz();
+    uint32_t spin = (mhz * us) / 5;
+    while (spin--)
+        ;
 }

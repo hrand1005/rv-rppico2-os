@@ -12,6 +12,7 @@ void uart_init() {
     // set uart functions on GPIO0 and GPIO1, and remove pad isolation control
     gpio_set_func(0, 2);
     gpio_set_func(1, 2);
+
     uart_reset_cycle();
 
     // TODO: set translate clrf, if necessary
@@ -22,10 +23,6 @@ void uart_init() {
 
     // enable uart, tx, rx
     AT(UART0_UARTCR) = (UARTCR_UARTEN | UARTCR_TXE | UARTCR_RXE);
-
-    // set gpio pins for uart instance 0
-    // gpio_init_func(0, 0x2); // init GPIO0 to UART0_TX
-    // gpio_init_func(1, 0x2); // init GPIO1 to UART0_RX
 
     // TODO: enable DMA requests
 
@@ -73,11 +70,12 @@ uint32_t uart_set_baudrate(uint32_t baudrate) {
     cr_save = AT(UART0_UARTCR);
 
     // insert delay, if outstanding transmit/receive
-    // if (cr_save & UARTCR_UARTEN) {
-    //     breakpoint();
-    //     for (uint32_t i = 0; i < 10000; i++)
-    //         ; // idk...
-    // }
+    if (cr_save & UARTCR_UARTEN) {
+        breakpoint();
+
+        for (uint32_t i = 0; i < 10000; i++)
+            ;
+    }
     AT(UART0_UARTLCR_H) = 0;
     AT(UART0_UARTCR) = cr_save;
 

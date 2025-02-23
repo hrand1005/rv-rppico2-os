@@ -38,4 +38,6 @@ int mtimer_start(uint32_t us);
  */
 // void mtimer_stop();
 
+void spin_us(uint32_t us);
+
 #endif
