@@ -63,3 +63,4 @@ build/*
 # Auto-generated
 init.gdb
 memmap.ld
+tags

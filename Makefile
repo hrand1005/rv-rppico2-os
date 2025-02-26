@@ -116,6 +116,9 @@ format:
 
 clean:
 	rm -rf $(BUILD_DIR)/* $(DOCS_DIR)/html/* $(DOCS_DIR)/latex/* \
-		init.gdb $(MEMMAP)
+		init.gdb $(MEMMAP) tags
 
-.PHONY: run compile console check docs format clean
+tags:
+	ctags -R .
+
+.PHONY: run compile console check docs format clean tags
