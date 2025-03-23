@@ -3160,13 +3160,23 @@ later they will also be given a default configuration in this function.
 
 Let us return to the UART implementation. CLK_PERI must support the required
 range of baud rates. If we use XOSC to drive CLK_PERI (without any dividers),
-CLK_PERI operates at 12 MHz, which would supports the following range of baud
-rates:
+CLK_PERI operates at 12 MHz, which supports the following range of baud rates:
 
 ```
 min: **750000** (12 MHz = 16 * (max baud rate))
 max: **12** (12 MHz <= 16 * 65535 * (min baud rate))
 ```
+
+### (03/22/2025)
+
+The following registers _control_ the UART and set the BAUD rate:
+
+`UARTLCR_H`: Line Control Register. This is the register used to signal that
+data is ready to be transmitted or received, among other things.
+
+`UARTIBRD` and `UARTFBRD`: Integer and Fractional BAUD rate divisors,
+respectively. The baud rate is set to a value times the integer register value
+divided by the fractional register value.
 
 
 # References

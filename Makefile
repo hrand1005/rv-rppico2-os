@@ -6,6 +6,7 @@ GDB := riscv32-unknown-elf-gdb
 MEMMAP := memmap.ld
 
 BUILD_DIR := build
+LOG_DIR := logs
 DOCS_DIR := docs
 # NOTE: only for definitions common to kernel and user code
 INCLUDE_DIR := include
@@ -59,7 +60,7 @@ run: $(GDB_TEMPLATE) $(MEMMAP_TEMPLATE)
 	@echo "Running $(if $(TEST),test $(TEST),application $(APP))..."
 	@sed "s|<PROGRAM>|$(TARGET)|" $(GDB_TEMPLATE) > init.gdb
 	make compile
-	$(GDB) $(TARGET) -x init.gdb
+	$(GDB) $(TARGET) -x init.gdb 2> $(LOG_DIR)/gdb.log
 
 compile: $(TARGET)
 
@@ -100,12 +101,14 @@ console:
 	openocd -s tcl \
 		-f interface/cmsis-dap.cfg \
 		-f target/rp2350-riscv.cfg \
-		-c "adapter speed 5000"
+		-c "adapter speed 5000" \
+		-l $(LOG_DIR)/openocd-console.log
 
 check: $(TARGET)
 	@echo Using openocd to flash and verify $(TARGET)...
 	openocd -s tcl -f interface/cmsis-dap.cfg -f target/rp2350-riscv.cfg \
-		-c "adapter speed 5000" -c "program $(TARGET) verify reset exit"
+		-c "adapter speed 5000" -c "program $(TARGET) verify reset exit" \
+		-l $(LOG_DIR)/openocd-check.log
 
 docs:
 	@mkdir -p $(DOCS_DIR)

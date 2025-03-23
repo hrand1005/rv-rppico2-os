@@ -64,3 +64,6 @@ build/*
 init.gdb
 memmap.ld
 tags
+
+# openocd logs
+logs/*

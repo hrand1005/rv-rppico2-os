@@ -23,6 +23,8 @@ void uart_init() {
 
     // enable uart, tx, rx
     AT(UART0_UARTCR) = (UARTCR_UARTEN | UARTCR_TXE | UARTCR_RXE);
+    
+    // TODO: enable FIFOs (UARTLCR_H)
 
     // TODO: enable DMA requests
 
@@ -33,7 +35,6 @@ void uart_putc(char c) {
     // wait for TX FIFO to have space
     while (AT(UART0_UARTFR) & UARTFR_TXFF)
         ;
-    // write char to TX FIFO
     AT(UART0_UARTDR) = c;
 }
 
@@ -41,7 +42,8 @@ char uart_get() {
     // wait for RX FIFO to have a byte
     while (AT(UART0_UARTFR) & UARTFR_RXFE)
         ;
-    // pop char from RX FIFO
+    // TODO: check for errors
+    return AT(UART0_UARTDR) & 0xff;
 }
 
 #define UART_CLOCK_HZ 125000000
