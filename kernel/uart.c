@@ -23,7 +23,7 @@ void uart_init() {
 
     // enable uart, tx, rx
     AT(UART0_UARTCR) = (UARTCR_UARTEN | UARTCR_TXE | UARTCR_RXE);
-    
+
     // TODO: enable FIFOs (UARTLCR_H)
 
     // TODO: enable DMA requests
@@ -46,7 +46,7 @@ char uart_get() {
     return AT(UART0_UARTDR) & 0xff;
 }
 
-#define UART_CLOCK_HZ 125000000
+#define UART_CLOCK_HZ 150000000
 
 // adapted from datasheet 12.1.7.1
 uint32_t uart_set_baudrate(uint32_t baudrate) {

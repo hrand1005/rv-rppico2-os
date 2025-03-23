@@ -97,14 +97,14 @@ $(KERNEL_BUILD_DIR)/%.o: $(KERNEL_DIR)/%.c
 	@mkdir -p $(KERNEL_BUILD_DIR)
 	$(CC) $(CFLAGS) -I $(KERNEL_DIR) -c $< -o $@
 
-console:
+console: | logs
 	openocd -s tcl \
 		-f interface/cmsis-dap.cfg \
 		-f target/rp2350-riscv.cfg \
 		-c "adapter speed 5000" \
 		-l $(LOG_DIR)/openocd-console.log
 
-check: $(TARGET)
+check: $(TARGET) | logs
 	@echo Using openocd to flash and verify $(TARGET)...
 	openocd -s tcl -f interface/cmsis-dap.cfg -f target/rp2350-riscv.cfg \
 		-c "adapter speed 5000" -c "program $(TARGET) verify reset exit" \
@@ -124,4 +124,7 @@ clean:
 tags:
 	ctags -R .
 
-.PHONY: run compile console check docs format clean tags
+logs:
+	mkdir -p $(LOG_DIR)
+
+.PHONY: run compile console check docs format clean tags logs
