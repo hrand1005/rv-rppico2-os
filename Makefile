@@ -60,7 +60,7 @@ run: $(GDB_TEMPLATE) $(MEMMAP_TEMPLATE)
 	@echo "Running $(if $(TEST),test $(TEST),application $(APP))..."
 	@sed "s|<PROGRAM>|$(TARGET)|" $(GDB_TEMPLATE) > init.gdb
 	make compile
-	$(GDB) $(TARGET) -x init.gdb 2> $(LOG_DIR)/gdb.log
+	$(GDB) $(TARGET) -x init.gdb 2>&1 | tee $(LOG_DIR)/gdb.log
 
 compile: $(TARGET)
 

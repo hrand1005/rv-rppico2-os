@@ -38,7 +38,7 @@ void uart_putc(char c) {
     AT(UART0_UARTDR) = c;
 }
 
-char uart_get() {
+char uart_getc() {
     // wait for RX FIFO to have a byte
     while (AT(UART0_UARTFR) & UARTFR_RXFE)
         ;

@@ -3167,17 +3167,103 @@ min: **750000** (12 MHz = 16 * (max baud rate))
 max: **12** (12 MHz <= 16 * 65535 * (min baud rate))
 ```
 
-### (03/22/2025)
+### FINISHING UART (03/22/2025)
 
-The following registers _control_ the UART and set the BAUD rate:
+After many detours and much grief, the UART is finally "finished". The uart
+part itself is not complicated to implement, but fixing all of the clocks, 
+resetting peripherals to a consistent state at boot time, integrating datasheet
+snippets, and getting the right configuration of peripheral clocks such that
+the selected baud rate would be valid all made me take a while to get everything
+together. But after all that, this is all it takes to directly write a
+character via UART:
 
-`UARTLCR_H`: Line Control Register. This is the register used to signal that
-data is ready to be transmitted or received, among other things.
+```c
+void uart_putc(char c) {
+    // wait for TX FIFO to have space
+    while (AT(UART0_UARTFR) & UARTFR_TXFF)
+        ;
+    AT(UART0_UARTDR) = c;
+}
+```
 
-`UARTIBRD` and `UARTFBRD`: Integer and Fractional BAUD rate divisors,
-respectively. The baud rate is set to a value times the integer register value
-divided by the fractional register value.
+The other stuff can be found in `kernel/uart.c`. A test counter is implemented
+in `tests/test_uart/main.c`.
 
+Other stuff that's important relates to platform initialization. Check out
+the clock configuration in `kernel/clock.c` as well as the standard resets
+in `kernel/resets.c`.
+
+### Just kidding, now reading via UART (03/24/2025)
+
+Might as well handle UART input. This is from `tests/test_uart_get/main.c`:
+
+```c
+/**
+ * @brief Tests reading from UART.
+ *
+ * Echos contents written to the UART console. Reads until '\r', then echos.
+ * Or until the buffer fills up. Whichever happens first.
+ *
+ * @author Herbie Rand
+ */
+#include "asm.h"
+#include "clock.h"
+#include "mtime.h"
+#include "resets.h"
+#include "types.h"
+#include "uart.h"
+
+#define BUFSIZE 100
+
+void echo(char *);
+void print(char *, uint32_t);
+
+static const char *msg = "echoing:\n\t";
+static char buf[BUFSIZE];
+
+int main() {
+    initial_reset_cycle();
+    clock_defaults_set();
+    postclk_reset_cycle();
+    uart_init();
+
+    char c;
+    uint32_t i = 0;
+
+    while (1) {
+        c = uart_getc();
+        if (c == '\r' || i == 99) {
+            buf[i] = '\0';
+            echo(buf);
+            i = 0;
+        } else {
+            buf[i++] = c;
+        }
+    }
+    return 0;
+}
+
+void echo(char *buf) {
+    uint32_t i = 0;
+    uart_putc('\r');
+    while (msg[i] != '\0') {
+        uart_putc(msg[i++]);
+    }
+    print(buf, BUFSIZE);
+}
+
+void print(char *buf, uint32_t n) {
+    uint32_t i = 0;
+    while (i < n && buf[i] != '\0') {
+        uart_putc(buf[i++]);
+    }
+    uart_putc('\n');
+    uart_putc('\r');
+}
+```
+
+minicom is kind of annoying, though, so I might use something else for the
+future. I find the controls and configuration to be clunky.
 
 # References
 

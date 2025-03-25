@@ -26,7 +26,7 @@ void uart_putc(char c);
  * @brief Gets a single character from teh UART0 receive buffer.
  * @returns Next received byte
  */
-char uart_get();
+char uart_getc();
 
 /**
  * @brief Sets baudrate for UART0 instance.
