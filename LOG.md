@@ -3265,6 +3265,139 @@ void print(char *buf, uint32_t n) {
 minicom is kind of annoying, though, so I might use something else for the
 future. I find the controls and configuration to be clunky.
 
+### Rebuilding the "Console" (03/30/2025)
+
+With UART working, we have another tool for debugging at our disposal (the
+other being breakpoints). UART gives us the ability to interact with our RTOS
+and see its output. But in its present state, I find several things to be clunky
+wrt how UART is used. For one, We must connect to our device using minicom. 
+From my limited time using minicom, I have found the interface to be somewhat
+clunky, plus I haven't found a nice way to configure it without setting up a
+system wide configuration. For example, coloring, echoing, handling newline
+characters correctly, are examples of things I'd just like to work at the time
+I create a console. There may be a way to configure minicom to do all this
+without needing to do a one-time system wide configuration, but I haven't found
+an elegant way to do this. After looking at other options for communiciating
+with devices via UART, it seems to me to be easier to just create a terminal
+front end of my own. So I intend to do that in Python using pyserial. 
+
+The other benefit I'm hoping to get out of creating a Python console is
+self-contained management of the openocd connection that needs to be initiated
+and closed before running a program on the pico 2 with GDB. There isn't all
+that much output from the current `make console` target that is immediately
+useful, which is why I've redirected that output to logfiles. Rather than
+having this and a UART frontend managed by separate targets, I'll create a
+console frontend that does both. The console will start by initiating a
+connection to the debugger, starting the gdb server. Then, the console will
+attempt to connect to the UART on the pico (via the debug probe) and set up
+a sort of REPL. This should all help me control things like logging, UART I/O,
+command interpretation, etc with a relatively simple Python application. The
+console application will also handle closing the openocd connection when it
+exits. The main challenge is making an application that correctly handles
+UART input and output concurrently, but my guess is that there's already an
+elegant way to do this.
+
+To start, I'll create a simple Python script that connects to the UART that can
+forward user input to the board, and print data from the UART receiver back
+to stdout.
+
+```python3
+import argparse
+import serial
+import sys
+import selectors
+import subprocess
+
+_OPENOCD_ARGS = [
+    "openocd",
+    "-s", "tcl",
+    "-f", "interface/cmsis-dap.cfg",
+    "-f", "target/rp2350-riscv.cfg",
+    "-c", "adapter speed 5000",
+]
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Connect to a UART device via pyserial.")
+    parser.add_argument("-d", "--device", type=str, required=True, help="The UART device (e.g. /dev/ttyACM0)")
+    parser.add_argument("-b", "--baudrate", type=int, required=True, help="Baud rate for the UART connection (e.g. 115200)")
+    parser.add_argument("-l", "--logfile", type=str, required=True, help="File for openocd console logs")
+    parser.add_argument("-t", "--timeout", type=int, default=1, help="Timeout value for initial UART connection")
+    return parser.parse_args()
+
+
+def connect_openocd(logfile):
+    with open(logfile, "w") as f:
+        process = subprocess.Popen(_OPENOCD_ARGS, stdout=f, stderr=f)
+
+    def close_openocd():
+        process.terminate()
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
+    return close_openocd
+
+
+def repl(conn, _input=sys.stdin, _output=sys.stdout):
+    sel = selectors.DefaultSelector()
+    sel.register(_input, selectors.EVENT_READ)
+    sel.register(conn, selectors.EVENT_READ)
+
+    print("> ", end="", flush=True, file=_output)
+
+    while True:
+        try:
+            for key, _ in sel.select():
+                if key.fileobj is _input:
+                    data = _input.readline().strip()
+                    conn.write((data + "\n").encode("utf-8"))
+                elif key.fileobj is conn:
+                    line = conn.readline().decode("utf-8", errors="ignore").strip()
+                    print(f"\r{line}\n", end="", flush=True, file=_output)
+                    print("> ", end="", flush=True, file=_output)
+        except KeyboardInterrupt:
+            print("\nExiting...", file=_output)
+            return
+
+
+def main():
+    args = parse_args()
+    
+    cb = connect_openocd(args.logfile)
+
+    uart = serial.Serial(args.device, args.baudrate, timeout=args.timeout)
+    uart.flush()
+    repl(uart)
+    uart.close()
+
+    cb()
+
+if __name__ == "__main__":
+    main()
+```
+
+And in the makefile, updating console target:
+
+```
+console: | logs venv
+	venv/bin/python3 console/main.py \
+		--device=/dev/ttyACM0 \
+		--baudrate=115200 \
+		--logfile=$(LOG_DIR)/console.log
+```
+
+and adding the venv target:
+
+```
+venv:
+	python3 -m venv venv
+	venv/bin/pip3 install -r requirements.txt
+```
+
+This is not perfect, but it's a start.
+
 # References
 
 1. riscv-privileged-20211203.pdf

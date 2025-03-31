@@ -32,7 +32,8 @@ int main() {
 
     while (1) {
         c = uart_getc();
-        if (c == '\r' || i == 99) {
+        if (c == '\n' || i == 99) {
+            // if (c == '\r' || i == 99) {
             buf[i] = '\0';
             echo(buf);
             i = 0;
@@ -45,7 +46,8 @@ int main() {
 
 void echo(char *buf) {
     uint32_t i = 0;
-    uart_putc('\r');
+    uart_putc('\n');
+    // uart_putc('\r');
     while (msg[i] != '\0') {
         uart_putc(msg[i++]);
     }
@@ -58,5 +60,5 @@ void print(char *buf, uint32_t n) {
         uart_putc(buf[i++]);
     }
     uart_putc('\n');
-    uart_putc('\r');
+    // uart_putc('\r');
 }

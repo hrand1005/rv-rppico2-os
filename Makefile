@@ -60,7 +60,7 @@ run: $(GDB_TEMPLATE) $(MEMMAP_TEMPLATE)
 	@echo "Running $(if $(TEST),test $(TEST),application $(APP))..."
 	@sed "s|<PROGRAM>|$(TARGET)|" $(GDB_TEMPLATE) > init.gdb
 	make compile
-	$(GDB) $(TARGET) -x init.gdb 2>&1 | tee $(LOG_DIR)/gdb.log
+	$(GDB) $(TARGET) -x init.gdb
 
 compile: $(TARGET)
 
@@ -97,12 +97,11 @@ $(KERNEL_BUILD_DIR)/%.o: $(KERNEL_DIR)/%.c
 	@mkdir -p $(KERNEL_BUILD_DIR)
 	$(CC) $(CFLAGS) -I $(KERNEL_DIR) -c $< -o $@
 
-console: | logs
-	openocd -s tcl \
-		-f interface/cmsis-dap.cfg \
-		-f target/rp2350-riscv.cfg \
-		-c "adapter speed 5000" \
-		-l $(LOG_DIR)/openocd-console.log
+console: | logs venv
+	venv/bin/python3 console/main.py \
+		--device=/dev/ttyACM0 \
+		--baudrate=115200 \
+		--logfile=$(LOG_DIR)/console.log
 
 check: $(TARGET) | logs
 	@echo Using openocd to flash and verify $(TARGET)...
@@ -126,5 +125,9 @@ tags:
 
 logs:
 	mkdir -p $(LOG_DIR)
+
+venv:
+	python3 -m venv venv
+	venv/bin/pip3 install -r requirements.txt
 
 .PHONY: run compile console check docs format clean tags logs
